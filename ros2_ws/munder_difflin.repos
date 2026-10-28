@@ -1,0 +1,10 @@
+# Third-party ROS source repositories for `vcs import ros2_ws/src < ros2_ws/munder_difflin.repos`.
+# Currently NONE: every ROS dependency (Gazebo, ros_gz, ros2_control, gz_ros2_control, MoveIt 2, the Panda model
+# moveit_resources_panda_*) comes from apt packages of ROS 2 Jazzy, see docs/ros2_interfaces.md s1.
+# franka_ros2 (v3.6.1, 8c94664) and franka_description (2.9.0, 7aeeddc) were evaluated and dropped (names fer_*, needs libfranka).
+# If a source repo is ever added, pin it here with an exact tag AND commit, e.g.:
+#   src/example:
+#     type: git
+#     url: https://github.com/org/example.git
+#     version: <tag-or-sha>
+repositories: {}

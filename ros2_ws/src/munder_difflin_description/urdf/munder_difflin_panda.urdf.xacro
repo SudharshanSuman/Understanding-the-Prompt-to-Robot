@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<!-- Upstream Panda + Franka Hand (moveit_resources_panda_description) with a gz_ros2_control system.
+     Joint/link names stay panda_* (INTERFACE_CONTRACTS s8). -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="panda">
+  <xacro:arg name="controllers_file" default="$(find munder_difflin_description)/config/ros2_controllers.yaml"/>
+
+  <xacro:include filename="$(find moveit_resources_panda_description)/urdf/panda.urdf.xacro"/>
+
+  <link name="world"/>
+  <joint name="world_to_panda_link0" type="fixed">
+    <parent link="world"/>
+    <child link="panda_link0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <ros2_control name="PandaGzSystem" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <joint name="panda_joint1"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0.0</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="panda_joint2"><command_interface name="position"/><state_interface name="position"><param name="initial_value">-0.785</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="panda_joint3"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0.0</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="panda_joint4"><command_interface name="position"/><state_interface name="position"><param name="initial_value">-2.356</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="panda_joint5"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0.0</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="panda_joint6"><command_interface name="position"/><state_interface name="position"><param name="initial_value">1.571</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="panda_joint7"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0.785</param></state_interface><state_interface name="velocity"/></joint>
+    <joint name="panda_finger_joint1"><command_interface name="position"/><state_interface name="position"><param name="initial_value">0.04</param></state_interface><state_interface name="velocity"/></joint>
+    <!-- panda_finger_joint2 mimics finger_joint1 (URDF <mimic>): state only, as in gz_ros2_control_demos -->
+    <joint name="panda_finger_joint2"><state_interface name="position"/><state_interface name="velocity"/></joint>
+  </ros2_control>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(arg controllers_file)</parameters>
+    </plugin>
+    <!-- ADR-007 hybrid grasp: physical fingers + attach joint created on demand by the executor -->
+    <plugin filename="gz-sim-detachable-joint-system" name="gz::sim::systems::DetachableJoint">
+      <parent_link>panda_link7</parent_link>
+      <child_model>red_cube</child_model>
+      <child_link>link</child_link>
+      <attach_topic>/munder_difflin/gz/attach/red_cube</attach_topic>
+      <detach_topic>/munder_difflin/gz/detach/red_cube</detach_topic>
+      <output_topic>/munder_difflin/gz/attached/red_cube</output_topic>
+    </plugin>
+    <plugin filename="gz-sim-detachable-joint-system" name="gz::sim::systems::DetachableJoint">
+      <parent_link>panda_link7</parent_link>
+      <child_model>blue_cube</child_model>
+      <child_link>link</child_link>
+      <attach_topic>/munder_difflin/gz/attach/blue_cube</attach_topic>
+      <detach_topic>/munder_difflin/gz/detach/blue_cube</detach_topic>
+      <output_topic>/munder_difflin/gz/attached/blue_cube</output_topic>
+    </plugin>
+    <plugin filename="gz-sim-detachable-joint-system" name="gz::sim::systems::DetachableJoint">
+      <parent_link>panda_link7</parent_link>
+      <child_model>green_cylinder</child_model>
+      <child_link>link</child_link>
+      <attach_topic>/munder_difflin/gz/attach/green_cylinder</attach_topic>
+      <detach_topic>/munder_difflin/gz/detach/green_cylinder</detach_topic>
+      <output_topic>/munder_difflin/gz/attached/green_cylinder</output_topic>
+    </plugin>
+  </gazebo>
+
+  <!-- finger pads: high friction for the physical half of the hybrid grasp (ADR-007) -->
+  <gazebo reference="panda_leftfinger"><mu1>1.5</mu1><mu2>1.5</mu2></gazebo>
+  <gazebo reference="panda_rightfinger"><mu1>1.5</mu1><mu2>1.5</mu2></gazebo>
+</robot>

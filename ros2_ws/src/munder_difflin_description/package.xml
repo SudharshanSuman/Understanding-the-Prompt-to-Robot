@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>munder_difflin_description</name>
+  <version>0.1.0</version>
+  <description>Franka Panda + Franka Hand for Gazebo Harmonic (gz_ros2_control). Reuses the upstream moveit_resources Panda model.</description>
+  <maintainer email="andy@munder.difflin">Andy</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>moveit_resources_panda_description</exec_depend>
+  <exec_depend>moveit_resources_panda_moveit_config</exec_depend>
+  <exec_depend>gz_ros2_control</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

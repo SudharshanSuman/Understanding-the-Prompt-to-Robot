@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.8)
+project(munder_difflin_bringup)
+find_package(ament_cmake REQUIRED)
+install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
+install(PROGRAMS scripts/gz_server.sh scripts/sim_lock.sh scripts/smoke_test.sh scripts/demo_pick_place.sh scripts/send_test_trajectory.py scripts/plan_execute_test.py DESTINATION lib/${PROJECT_NAME})
+ament_package()
