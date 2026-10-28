@@ -11,7 +11,7 @@ from app.main import create_app
 from app.schemas import PIPELINE_STAGES
 from app.tokenizer import ApproximateTokenizer
 
-TOKEN = "w" * 40
+TOKEN = "ws-" + "Hk4Ua8Nq2Xc6Zt0Pm5Vr9Ly3Bf7Dj1Gs"  # random-looking, built at runtime
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 ORIGIN = {"origin": "http://localhost:5173"}
 
@@ -185,3 +185,24 @@ def test_missing_origin_is_refused_when_required():
         with c.websocket_connect("/ws/pipeline", headers=ORIGIN) as ws:
             login(ws)
     assert Settings.from_env({"MD_API_TOKEN": TOKEN, "MD_REQUIRE_ORIGIN": "true"}).require_origin is True
+
+
+def test_failed_ws_logins_share_the_http_lockout_budget():
+    with make_client(auth_failures_per_min=3) as c:
+        codes = []
+        for _ in range(5):
+            with c.websocket_connect("/ws/pipeline") as ws:
+                ws.send_text(json.dumps({"type": "auth", "token": "wrong"}))
+                with pytest.raises(WebSocketDisconnect) as err:
+                    ws.receive_json()
+                codes.append(err.value.code)
+        assert codes == [4401, 4401, 4401, 1008, 1008]
+        with c.websocket_connect("/ws/pipeline") as ws:
+            login(ws)  # the valid token is never locked out
+
+
+def test_auth_timeout_says_so():
+    with make_client(ws_auth_seconds=0.05) as c, c.websocket_connect("/ws/pipeline") as ws:
+        with pytest.raises(WebSocketDisconnect) as err:
+            ws.receive_json()
+    assert err.value.code == 1008 and err.value.reason == "auth timeout"

@@ -1,5 +1,7 @@
 """REST API (FastAPI TestClient). Providers are fakes: no network call and no real key is used."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -10,7 +12,7 @@ from app.providers import DeterministicFallbackProvider, LanguageModelProvider, 
 from app.schemas import PIPELINE_STAGES
 from app.tokenizer import ApproximateTokenizer
 
-TOKEN = "t" * 40
+TOKEN = "api-" + "Q7f2Lw9xK3mZ8pR1vB6nC4hJ0sD5gT2yE"  # random-looking, built at runtime
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 FAKE_KEY = "sk-" + "ant-FAKE0123456789abcdefFAKE"  # built at runtime so secret scanners see no literal key
 
@@ -329,3 +331,88 @@ def test_pasted_key_is_redacted_before_tokenizing_and_parsing(client, monkeypatc
     assert "SECRET" not in r.text
     task_id = submit(client, f"Put the red cube in the storage box {fake}")
     assert "SECRET" not in client.get(f"/api/v1/tasks/{task_id}", headers=AUTH).text
+
+
+# --- MD-TEST-004 regressions (API-1, API-2, API-4) -------------------------------------------------------------------
+def test_unauthenticated_bad_body_is_401_before_any_parsing(client):
+    r = client.post("/api/v1/tasks", content=b"not json", headers={"content-type": "application/json"})
+    assert r.status_code == 401 and r.json() == {"detail": "unauthorized"}
+
+
+@pytest.mark.parametrize("auth", [True, False])
+def test_chunked_body_over_the_cap_is_413(client, auth):
+    def chunks():
+        for _ in range(8):  # 8 x 64 KiB = 512 KiB, no Content-Length
+            yield b"a" * 65_536
+    r = client.post("/api/v1/tasks", content=chunks(), headers={"content-type": "application/json", **(AUTH if auth else {})})
+    assert r.status_code == (413 if auth else 401)
+    small = client.post("/api/v1/tasks", content=iter([b'{"instruction": "Move the box to the left"}']),
+                        headers={"content-type": "application/json", **AUTH})
+    assert small.status_code == 202  # a chunked body under the cap still works
+
+
+def test_cors_headers_survive_the_gate(client):
+    r = client.post("/api/v1/tasks", json={"instruction": "x"}, headers={"origin": "http://localhost:5173"})
+    assert r.status_code == 401 and r.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+class BuggyExecutor(SimulatedExecutor):
+    def status(self):
+        return super().status().model_copy(update={"connected": True, "can_execute": True})
+
+    def execute(self, task, emit, is_cancelled):
+        raise RuntimeError("bug in the executor")
+
+
+def test_executor_bug_fails_the_task_instead_of_hanging():
+    with make_client(executor=BuggyExecutor()) as c:
+        task_id = submit(c, "Put the red cube in the storage box")
+        detail = c.get(f"/api/v1/tasks/{task_id}", headers=AUTH).json()
+    assert detail["status"] == "failed", detail["status"]
+    assert "internal error (RuntimeError)" in json.dumps(detail)
+
+
+def test_uvicorn_access_log_is_redacted():
+    import logging
+    with make_client():
+        rec = logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, '%s - "%s %s HTTP/%s" %d',
+                                ("127.0.0.1:5", "GET", f"/api/v1/executor?access_token={TOKEN}&k={FAKE_KEY}", "1.1", 200), None)
+        assert logging.getLogger("uvicorn.access").filter(rec)
+        line = rec.getMessage()
+    assert TOKEN not in line and "FAKE0123456789" not in line and "[REDACTED]" in line and line.endswith("200")
+
+
+# --- MD-DEV-008: config hardening and e-stop read-back --------------------------------------------------------------
+@pytest.mark.parametrize("weak", ["a" * 32, " " * 32, "ab" * 20, "abcdefgh" * 5, "0123456" * 6, "0123456789" * 4, "Kq8zT1wLm3Pb" * 3])
+def test_trivially_weak_tokens_are_refused_at_startup(weak):
+    with pytest.raises(ConfigError) as err:
+        Settings.from_env({"MD_API_TOKEN": weak})
+    assert "MD_API_TOKEN" in str(err.value) and weak not in str(err.value)
+
+
+def test_a_generated_token_is_accepted():
+    import secrets
+    for _ in range(50):
+        assert Settings.from_env({"MD_API_TOKEN": secrets.token_urlsafe(32)}).api_token
+        assert Settings.from_env({"MD_API_TOKEN": secrets.token_hex(16)}).api_token
+
+
+def test_weak_token_check_comes_after_the_other_checks():
+    with pytest.raises(ConfigError, match="MD_BIND_HOST"):
+        Settings.from_env({"MD_API_TOKEN": "t" * 40, "MD_BIND_HOST": "0.0.0.0"})
+
+
+@pytest.mark.parametrize("rate", ["0", "-5"])
+def test_task_rate_must_be_positive(rate):
+    with pytest.raises(ConfigError, match="MD_TASK_RATE_PER_MIN"):
+        Settings.from_env({"MD_API_TOKEN": TOKEN, "MD_TASK_RATE_PER_MIN": rate})
+
+
+@pytest.mark.parametrize("bad", [[0.0, float("nan")], [float("nan"), 0.0], [0.0, float("inf")], [float("-inf")]])
+def test_non_finite_read_back_is_never_a_confirmed_stop(bad):
+    from app.executor import stop_report
+    report = stop_report(bad, "STOPPED", "test")
+    assert report.status == "e_stop_unverified" and report.max_joint_velocity is None
+    assert "NaN or inf" in report.detail
+    json.dumps(report.model_dump())  # stays valid JSON (no NaN literal)
+    assert stop_report([0.0, 0.0], "STOPPED", "test").status == "e_stop_confirmed"

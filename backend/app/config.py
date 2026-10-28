@@ -11,7 +11,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 MIN_TOKEN_CHARS = 32
+MIN_DISTINCT_CHARS = 8  # a random 32-char token has ~25; "aaaa..." or "abab..." has 1-2
 DEFAULT_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+
+
+def _trivial_token(token: str) -> bool:
+    """True for tokens with almost no entropy: few distinct characters, or a short pattern repeated."""
+    if len(set(token)) < MIN_DISTINCT_CHARS:
+        return True
+    return any(token == (token[:p] * (len(token) // p + 1))[: len(token)] for p in range(1, len(token) // 2 + 1))
 
 
 class ConfigError(RuntimeError):
@@ -60,6 +68,13 @@ class Settings:
             raise ConfigError("MD_ALLOWED_ORIGINS may only contain '*' when DEBUG=true")
         if not 0 < self.port < 65536:
             raise ConfigError("APP_PORT must be between 1 and 65535")
+        if self.task_rate_per_min < 1:
+            raise ConfigError("MD_TASK_RATE_PER_MIN must be at least 1")
+        if self.auth_failures_per_min < 1 or self.ws_max_connections < 1 or self.max_tasks_kept < 1:
+            raise ConfigError("auth failure budget, WebSocket connection limit and task history must be at least 1")
+        if _trivial_token(self.api_token):  # checked last so other errors still name their own variable
+            raise ConfigError("MD_API_TOKEN is too predictable (repeated characters or a short repeated pattern); "
+                              "generate one, e.g. python3 -c 'import secrets; print(secrets.token_urlsafe(32))'")
         return self
 
     @classmethod

@@ -102,8 +102,13 @@ class LocalInferenceProvider(_HTTPProvider):
         has_model = self.model in names or f"{self.model}:latest" in names
         return ProviderStatus(
             name=self.name, kind=self.kind, configured=True, available=has_model, model=self.model,
-            detail="model installed" if has_model else f"model '{self.model}' not pulled in Ollama",
+            detail="model installed" if has_model else self._missing_model_detail(names),
         )
+
+    def _missing_model_detail(self, installed: set[str]) -> str:
+        have = ", ".join(sorted(n for n in installed if n)[:5]) or "none"
+        return (f"model '{self.model}' is not pulled in Ollama (installed: {have}); "
+                f"run 'ollama pull {self.model}' or set MD_LOCAL_MODEL to an installed model")
 
     def _complete(self, system: str, messages: list[dict[str, str]]) -> str:
         body = self._post(

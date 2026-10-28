@@ -223,6 +223,9 @@ class TaskManager:
         except ExecutorError as exc:
             record.result["error"] = str(exc)
             return self._set_status(record, Status.FAILED)
+        except Exception as exc:  # an executor bug must not leave the task 'executing' forever
+            record.result["error"] = f"internal error ({type(exc).__name__})"
+            return self._set_status(record, Status.FAILED)
         self._set_status(record, Status.CANCELLED if record.cancel.is_set() else Status.COMPLETED)
 
     def clarify(self, task_id: str, selected_option: str | None, free_text: str | None) -> str:

@@ -7,6 +7,7 @@ Its e-stop reports only what it observes in its own joint state (SEC-013), label
 
 from __future__ import annotations
 
+import math
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
@@ -47,6 +48,28 @@ class StopReport(BaseModel):
     source: str
     requires_reset: bool = True
     detail: str = ""
+
+
+def stop_report(velocities: Sequence[float], controller_state: str, source: str) -> StopReport:
+    """Judge an e-stop from the joint-velocity read-back. Real executors should use this too.
+
+    Confirmed only if every velocity is a finite number below tolerance and the controller says STOPPED.
+    NaN or inf means the read-back cannot be trusted: unverified, and max_joint_velocity is left empty
+    (max() would silently skip a NaN that follows a 0.0).
+    """
+    values = [float(v) for v in velocities]
+    if not all(math.isfinite(v) for v in values):
+        return StopReport(status="e_stop_unverified", controller_state=controller_state, max_joint_velocity=None,
+                          source=source, detail="joint velocity read-back contained NaN or inf")
+    observed = max((abs(v) for v in values), default=None)
+    stopped = observed is not None and observed < VELOCITY_TOLERANCE and controller_state == "STOPPED"
+    return StopReport(
+        status="e_stop_confirmed" if stopped else "e_stop_unverified",
+        controller_state=controller_state,
+        max_joint_velocity=observed,
+        source=source,
+        detail="" if stopped else "joint velocities did not read back below tolerance",
+    )
 
 
 class Executor(ABC):
@@ -103,15 +126,7 @@ class SimulatedExecutor(Executor):
             if self._stop_effective:
                 self._velocities = [0.0] * len(self._velocities)
                 self._controller_state = "STOPPED"
-            observed = max((abs(v) for v in self._velocities), default=None)
-            stopped = observed is not None and observed < VELOCITY_TOLERANCE and self._controller_state == "STOPPED"
-            return StopReport(
-                status="e_stop_confirmed" if stopped else "e_stop_unverified",
-                controller_state=self._controller_state,
-                max_joint_velocity=observed,
-                source="simulated joint state (no ROS 2 connected)",
-                detail="" if stopped else "joint velocities did not read back below tolerance",
-            )
+            return stop_report(self._velocities, self._controller_state, "simulated joint state (no ROS 2 connected)")
 
     def reset(self) -> ExecutorStatus:
         with self._lock:

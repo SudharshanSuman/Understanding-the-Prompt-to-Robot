@@ -21,7 +21,8 @@ from app.security import MAX_RAW_CHARS, InputRejected, sanitize_instruction
 from app.tasks import TaskManager, TaskNotFound
 from app.tokenizer import get_tokenizer
 
-# Close codes: 1003 unsupported data, 1008 policy, 1009 too big, 1013 try later, 4401 unauthorized
+# Close codes: 1003 unsupported data, 1008 policy (bad origin, no auth message within ws_auth_seconds, idle,
+# too many failed logins), 1009 too big, 1013 try later (connection cap), 4401 wrong or malformed auth message.
 CLOSE_UNSUPPORTED, CLOSE_POLICY, CLOSE_TOO_BIG, CLOSE_BUSY, CLOSE_UNAUTHORIZED = 1003, 1008, 1009, 1013, 4401
 OUTBOX_SIZE = 1000
 
@@ -109,11 +110,11 @@ class Session:
         except asyncio.QueueFull:
             pass
 
-    async def receive_text(self, timeout: float) -> str:
+    async def receive_text(self, timeout: float, timeout_reason: str = "idle timeout") -> str:
         try:
             message = await asyncio.wait_for(self.ws.receive(), timeout)
         except asyncio.TimeoutError:
-            raise _Closed(CLOSE_POLICY, "idle timeout") from None
+            raise _Closed(CLOSE_POLICY, timeout_reason) from None
         if message["type"] == "websocket.disconnect":
             raise WebSocketDisconnect(message.get("code", 1000))
         if message.get("bytes") is not None:
@@ -124,14 +125,15 @@ class Session:
         return text
 
     async def authenticate(self) -> None:
-        text = await self.receive_text(self.settings.ws_auth_seconds)
+        text = await self.receive_text(self.settings.ws_auth_seconds, "auth timeout")
         try:
             token = _AUTH.validate_json(text).token
         except ValidationError:
             token = None
         if not self.guard.token_ok(token):
             client = self.ws.client.host if self.ws.client else "unknown"
-            self.guard.failures.hit(client)
+            if not self.guard.failures.hit(client):  # same budget as HTTP; the valid token still works
+                raise _Closed(CLOSE_POLICY, "too many failed logins")
             raise _Closed(CLOSE_UNAUTHORIZED, "unauthorized")
 
     async def pump(self) -> None:

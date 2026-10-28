@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import protected, public
-from app.api.security import Guard, RateLimiter, RedactedJSONResponse
+from app.api.security import Guard, RateLimiter, RedactedJSONResponse, RequestGate
 from app.config import Settings
 from app.executor import Executor, SimulatedExecutor
 from app.providers import CloudAPIProvider, LanguageModelProvider, LocalInferenceProvider, NVIDIAInferenceProvider
@@ -28,6 +28,7 @@ from app.websocket.handlers import ConnectionSlots, pipeline_ws, telemetry_ws
 
 log = logging.getLogger("munder_difflin")
 MAX_BODY_BYTES = MAX_RAW_CHARS * 2
+PUBLIC_PATHS = frozenset({"/api/v1/health"})
 
 
 def default_providers() -> list[LanguageModelProvider]:
@@ -41,8 +42,11 @@ def create_app(
     tokenizer: Tokenizer | None = None,
 ) -> FastAPI:
     settings = (settings or Settings.from_env()).validate()  # SEC S5: refuse to start misconfigured
-    install_log_redaction()
     guard = Guard(settings.api_token, settings.auth_failures_per_min)
+    install_log_redaction(extra=guard.secrets)
+    # uvicorn's loggers do not propagate to root; its access log carries full URLs (MD-TEST-004 API-4).
+    for name in ("uvicorn.access", "uvicorn.error"):
+        install_log_redaction(logging.getLogger(name), extra=guard.secrets)
     response_class = type("AppJSONResponse", (RedactedJSONResponse,), {"guard": guard})
 
     app = FastAPI(
@@ -65,6 +69,9 @@ def create_app(
         guard.secrets,
     )
 
+    # Auth before body, streaming body cap. Added first so CORS (added next) wraps it and 401/413 keep CORS headers.
+    app.add_middleware(RequestGate, guard=guard, max_body_bytes=MAX_BODY_BYTES, response_class=response_class,
+                       is_public=lambda path: path in PUBLIC_PATHS)
     # SEC-007: explicit origins; credentials off (auth is a bearer header, not cookies).
     app.add_middleware(
         CORSMiddleware,
@@ -73,13 +80,6 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["Authorization", "Content-Type"],
     )
-
-    @app.middleware("http")
-    async def limit_body(request: Request, call_next):
-        length = request.headers.get("content-length")
-        if length is not None and (not length.isdigit() or int(length) > MAX_BODY_BYTES):
-            return response_class({"detail": "request body too large"}, status_code=413)
-        return await call_next(request)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):

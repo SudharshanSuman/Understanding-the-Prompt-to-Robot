@@ -217,3 +217,11 @@ def test_json_extraction_caps_output_size_and_survives_deep_nesting():
     with pytest.raises(ValueError):  # over the size cap; a RecursionError inside json is also contained
         extract_json_object(deep)
     assert extract_json_object('{"a":' * 500 + "1" + "}" * 500)["a"]  # moderate nesting still parses
+
+
+def test_missing_ollama_model_is_named_with_what_is_installed():
+    tags = {"models": [{"name": "qwen:14b"}, {"name": "deepseek-r1:7b"}]}
+    st = LocalInferenceProvider(env={}, client=client(lambda r: httpx.Response(200, json=tags))).status()
+    assert not st.available and st.model == "llama3.2"
+    assert "'llama3.2' is not pulled" in st.detail and "deepseek-r1:7b, qwen:14b" in st.detail
+    assert "ollama pull llama3.2" in st.detail and "MD_LOCAL_MODEL" in st.detail

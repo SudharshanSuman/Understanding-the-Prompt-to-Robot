@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import unicodedata
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 MAX_INSTRUCTION_CHARS = 2048
 MAX_WORD_CHARS = 64
@@ -65,26 +65,38 @@ def redact(text: str, secrets: Iterable[str] = ()) -> str:
 class RedactingFilter(logging.Filter):
     """Rewrites every record so secret env values and key-like strings never reach a handler."""
 
-    def __init__(self, env: Mapping[str, str] | None = None) -> None:
+    def __init__(self, env: Mapping[str, str] | None = None,
+                 extra: Callable[[], Iterable[str]] | None = None) -> None:
         super().__init__()
         self._env = env
+        self._extra = extra
 
     def filter(self, record: logging.LogRecord) -> bool:
+        secrets = [*secret_values(self._env), *(self._extra() if self._extra else ())]
+        if record.name == "uvicorn.access" and isinstance(record.args, tuple):
+            # uvicorn's AccessFormatter unpacks args (client, method, path, version, status): keep the tuple.
+            record.args = tuple(redact(a, secrets) if isinstance(a, str) else a for a in record.args)
+            record.msg = redact(str(record.msg), secrets)
+            return True
         message = record.getMessage()
         if record.exc_info and not record.exc_text:
             record.exc_text = logging.Formatter().formatException(record.exc_info)
-        secrets = secret_values(self._env)
         record.msg, record.args = redact(message, secrets), None
         if record.exc_text:
             record.exc_text = redact(record.exc_text, secrets)
         return True
 
 
-def install_log_redaction(logger: logging.Logger | None = None) -> RedactingFilter:
-    """Attach the filter to every handler of the logger (root by default)."""
+def install_log_redaction(logger: logging.Logger | None = None,
+                          extra: Callable[[], Iterable[str]] | None = None) -> RedactingFilter:
+    """Attach the filter to the logger and every handler it has now (root by default)."""
     logger = logger or logging.getLogger()
-    flt = RedactingFilter()
+    flt = RedactingFilter(extra=extra)
+    for old in [f for f in logger.filters if isinstance(f, RedactingFilter)]:
+        logger.removeFilter(old)  # one per logger, even when create_app runs many times
     for handler in logger.handlers:
+        for old in [f for f in handler.filters if isinstance(f, RedactingFilter)]:
+            handler.removeFilter(old)
         handler.addFilter(flt)
     logger.addFilter(flt)
     return flt
