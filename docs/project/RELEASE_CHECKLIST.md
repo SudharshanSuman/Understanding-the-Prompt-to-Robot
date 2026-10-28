@@ -56,7 +56,7 @@ Desktop shell decision: **Electron** (no Rust / WebKitGTK installs). `frontend/p
 
 ## 4a. ROS workspace build and launch verification (for when Andy delivers `ros2_ws/`)
 
-Status 2026-10-28: **none of these steps has been executed.** At 02:50Z `ros2_ws/src` holds Andy's `munder_difflin_bringup`, `munder_difflin_description` and `munder_difflin_gazebo` (untracked, held by god until built and verified); `ros2_ws/` also has `build/ install/ log/ logs/` directories that REL did not create or inspect. The earlier Franka checkouts are gone. Run every step in a clean shell (`env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin bash --noprofile --norc`) so `~/ros2_ws`, `~/colcon_ws` and the other workspaces cannot shadow this one. No `sudo`; a missing system package is reported to the Boss for the human to install. Record the command, exit code and the real output tail for each step; mark anything skipped "not executed".
+Status 2026-10-28: **first run done 07:25-07:27Z (REL), results in "Run 1 results" below; steps not listed there are not executed.** Original note: none of these steps had been executed before that run. At 02:50Z `ros2_ws/src` holds Andy's `munder_difflin_bringup`, `munder_difflin_description` and `munder_difflin_gazebo` (untracked, held by god until built and verified); `ros2_ws/` also has `build/ install/ log/ logs/` directories that REL did not create or inspect. The earlier Franka checkouts are gone. Run every step in a clean shell (`env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin bash --noprofile --norc`) so `~/ros2_ws`, `~/colcon_ws` and the other workspaces cannot shadow this one. No `sudo`; a missing system package is reported to the Boss for the human to install. Record the command, exit code and the real output tail for each step; mark anything skipped "not executed".
 
 **Pre-conditions**
 - [ ] No third-party source checkouts: the sim uses the apt Panda packages (`moveit_resources_panda_*`), so no `franka_ros2`, `franka_description` or `libfranka` (god, 2026-10-28). Evidence: `find ros2_ws/src -name .git -maxdepth 3` prints nothing; `ls ros2_ws/src` lists only `munder_difflin_*`. **If a source dependency is ever added**, pin it by tag + commit SHA in `ros2_ws/munder_difflin.repos`, fetch with `vcs import`, no submodules; its checkout path goes in `.gitignore`.
@@ -93,6 +93,24 @@ Status 2026-10-28: **none of these steps has been executed.** At 02:50Z `ros2_ws
 **Backend integration**
 - [ ] The FastAPI backend reaches ROS through the interface in `docs/INTERFACE_CONTRACTS.md` (path TBD by Andy/Oscar): one natural-language command from the API to a completed motion in simulation, with request id, log lines and final joint state. Run only after QA signs off the backend suite (§5).
 - [ ] Backend and ROS use separate Python environments (ADR-005): `backend/.venv` is not on the ROS `PYTHONPATH` and vice versa. Evidence: `echo $PYTHONPATH` in each shell.
+
+**Run 1 results (REL, 2026-10-28 07:25-07:27Z, clean shell `env -i`, `ROS_LOCALHOST_ONLY=1`, Panda sim, headless)**
+
+| Step | Result | Evidence |
+|---|---|---|
+| `rosdep install --from-paths src --ignore-src --simulate` | **FAIL**, exit 1 | `munder_difflin_control: Cannot locate rosdep definition for [ament_python]` — its `package.xml` line 8 has `<buildtool_depend>ament_python</buildtool_depend>`; `ament_python` is not a rosdep key. Owner: Andy |
+| `colcon build --symlink-install` | PASS, exit 0 | `Summary: 5 packages finished [6.16s]`. **Incremental**, not clean: `ros2_ws/build` and `install` already existed. A fresh-clone build is **not executed** (`ros2_ws/` is untracked, a clone would not contain it) |
+| `colcon test` | **FAIL**, exit 5 | `munder_difflin_control` has no `test/` dir: `Ran 0 tests ... NO TESTS RAN`, `Failed <<< munder_difflin_control`. `colcon test-result`: 0 tests, 0 errors, 0 failures. The other 4 packages finished. Owner: Andy (add a test or make the package declare none) |
+| Overlay | PASS | `ros2 pkg list` shows the 5 `munder_difflin_*` packages; `ros2 pkg prefix munder_difflin_bringup` and `_control` point into `ros2_ws/install` |
+| No nested `.git` | PASS | `find src -name .git -maxdepth 3` printed nothing |
+| `smoke_test.sh --moveit` | **PASS**, exit 0, `SMOKE: PASS` | wall time 58 s (07:25:56 to 07:26:54). Controllers: `panda_arm_controller` (JointTrajectoryController) active, `panda_hand_controller` (GripperActionController) active, `joint_state_broadcaster` active |
+| Trajectory | PASS | `action error_code=0`, max joint delta 0.4000 rad, joints after = target `[0.4,-0.5,0.0,-2.0,0.0,1.8,0.785]` |
+| MoveIt plan + execute | PASS | `MoveIt error_code=1 (SUCCESS)`, max joint delta 0.553 rad |
+| Lock | PASS | `hive/sim.lock` absent before, taken and released by the script, absent after |
+| Clean shutdown | **FAIL (matches Angela's D1)** | after the script exited, `gz sim -r -s -v2 munder_difflin.sdf` (PID 506325, 244 MB RSS, started with my run) was still running. REL stopped that one PID with `kill -TERM`; afterwards no `gz sim`/`ruby` process was left. Owner: Andy |
+| Memory | INFO | `free -m` available 5547 MB before, 5427 MB after the run (with the orphan alive); peak not measured |
+
+Not executed in run 1: GUI/display run, `ros2 node list` and `ros2 topic hz /joint_states` checks, out-of-limit goal rejection (Angela reports it fails as D2), UR5e fallback launch, Panda `demo.launch.py` baseline, backend-to-ROS integration, fresh-clone build, warnings review of the build log.
 
 **Sign-off for this block:** Tester GO path ____ · REL commit ____ (nothing is DONE until the Tester has verified it).
 
