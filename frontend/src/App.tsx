@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Api, ApiError, DEFAULT_API_BASE } from "./api";
+import { desktopBridge, type DesktopSession } from "./desktop";
 import { PipelineSocket, type Frame, type SocketState } from "./socket";
 import {
   FINAL_STATUSES, type Environment, type ExecutorStatus, type Health, type PipelineEvent, type ProviderStatus,
@@ -14,8 +15,14 @@ import { Inspector, type LogEntry } from "./components/Inspector";
 
 const MAX_LOGS = 300;
 
-function Connect({ onConnect, error }: { onConnect: (base: string, token: string) => void; error: string }) {
-  const [base, setBase] = useState(DEFAULT_API_BASE);
+interface ConnectProps {
+  onConnect: (base: string, token: string) => void;
+  error: string;
+  desktop: DesktopSession | null;
+}
+
+function Connect({ onConnect, error, desktop }: ConnectProps) {
+  const [base, setBase] = useState(desktop?.apiBase ?? DEFAULT_API_BASE);
   const [token, setToken] = useState("");
   return (
     <main className="connect">
@@ -29,6 +36,11 @@ function Connect({ onConnect, error }: { onConnect: (base: string, token: string
                onChange={(e) => setToken(e.target.value)} />
         {error && <p className="error" role="alert">{error}</p>}
         <button className="btn btn--primary" type="submit" disabled={!token.trim()}>Connect</button>
+        {desktop?.token && (
+          <button className="btn" type="button" onClick={() => onConnect(desktop.apiBase, desktop.token!)}>
+            Connect to the desktop backend
+          </button>
+        )}
       </form>
     </main>
   );
@@ -37,6 +49,7 @@ function Connect({ onConnect, error }: { onConnect: (base: string, token: string
 export default function App() {
   const [api, setApi] = useState<Api | null>(null);
   const [connectError, setConnectError] = useState("");
+  const [desktop, setDesktop] = useState<DesktopSession | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [executor, setExecutor] = useState<ExecutorStatus | null>(null);
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
@@ -53,6 +66,7 @@ export default function App() {
   const [stopReport, setStopReport] = useState<StopReport | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false); // e-stop has its own flag: unrelated work must never block it
   const currentId = useRef<string | null>(null);
 
   const log = useCallback((level: LogEntry["level"], text: string) => {
@@ -95,6 +109,19 @@ export default function App() {
     setApi(a);
   }, []);
 
+  // Desktop mode: the backend the app launched is connected to automatically with its per-launch token.
+  useEffect(() => {
+    const bridge = desktopBridge();
+    if (!bridge) return;
+    let live = true;
+    bridge.session().then((s) => {
+      if (!live) return;
+      setDesktop(s);
+      if (s.token) void connect(s.apiBase, s.token);
+    }, (err) => setConnectError(`Desktop bridge failed: ${String(err)}`));
+    return () => { live = false; };
+  }, [connect]);
+
   // Live stream + periodic status while connected.
   useEffect(() => {
     if (!api) return;
@@ -129,7 +156,7 @@ export default function App() {
     return () => { s.stop(); clearInterval(timer); };
   }, [api, fail, log, openTask, refreshStatus]);
 
-  if (!api) return <Connect onConnect={connect} error={connectError} />;
+  if (!api) return <Connect key={desktop?.apiBase ?? ""} onConnect={connect} error={connectError} desktop={desktop} />;
 
   const run = async (what: string, fn: () => Promise<void>) => {
     setBusy(true);
@@ -140,6 +167,7 @@ export default function App() {
     const r = await api.submit(text);
     log("info", `submitted ${r.task_id}`);
     setSelectedStage(null);
+    setPreview(null); // a new task replaces an older preview in the Tokenization tab
     await openTask(api, r.task_id);
     setHistory(await api.tasks());
   });
@@ -151,19 +179,22 @@ export default function App() {
     <div className="app">
       <Header
         health={health} executor={executor} providers={providers} activeProvider={active} socket={socket}
-        stopReport={stopReport} busy={busy}
+        stopReport={stopReport} stopping={stopping}
         onSelectProvider={(id) => run("select provider", async () => {
           const st = await api.selectProvider(id);
           setActive(st.provider_id);
           log("info", `provider set to ${st.provider_id}`);
         })}
-        onEStop={() => run("e-stop", async () => {
-          const report = await api.eStop();
-          setStopReport(report);
-          log(report.status === "e_stop_confirmed" ? "warn" : "error",
-            `E-STOP ${report.status}: max |q̇| ${report.max_joint_velocity ?? "n/a"} (${report.source})`);
-          await refreshStatus(api);
-        })}
+        onEStop={async () => {
+          setStopping(true);
+          try {
+            const report = await api.eStop();
+            setStopReport(report);
+            log(report.status === "e_stop_confirmed" ? "warn" : "error",
+              `E-STOP ${report.status}: max |q̇| ${report.max_joint_velocity ?? "n/a"} (${report.source})`);
+            await refreshStatus(api);
+          } catch (err) { fail("e-stop", err); } finally { setStopping(false); }
+        }}
         onDisconnect={() => { setApi(null); setCurrent(null); setEvents({}); }}
       />
       <CommandPanel
@@ -177,10 +208,11 @@ export default function App() {
           await refreshStatus(api);
         })}
         onPreview={(text) => run("tokenize", async () => setPreview(await api.tokenize(text)))}
-        onOpen={(id) => void openTask(api, id)}
+        onOpen={(id) => { setPreview(null); void openTask(api, id); }}
         onClarify={(option, freeText) => current && run("clarify", async () => {
           const id = current.task_id;
           setEvents((m) => ({ ...m, [id]: [] }));
+          setPreview(null);
           await api.clarify(id, option, freeText);
           await openTask(api, id);
         })}

@@ -79,12 +79,13 @@ const EXPLAIN: Record<string, string> = {
 export function Inspector(p: Props) {
   const [tab, setTab] = useState<Tab>("Tokenization");
   const live = p.events.find((e) => e.stage === "tokenization" && e.data && "tokenization" in e.data);
-  const tokens = (live?.data.tokenization as TokenizationResult | undefined) ?? p.preview;
+  // The newest user action wins: a preview shows until a task is submitted or opened (UI-1).
+  const tokens = p.preview ?? (live?.data.tokenization as TokenizationResult | undefined) ?? null;
   const views = stageViews(p.events);
 
   const panels: Record<Tab, ReactNode> = {
     "Tokenization": (
-      <TokenizationPanel result={tokens} source={live ? `from task ${p.task?.task_id ?? ""}` : p.preview ? "preview" : undefined} />
+      <TokenizationPanel result={tokens} source={p.preview ? "preview" : live ? `from task ${p.task?.task_id ?? ""}` : undefined} />
     ),
     "Structured JSON": p.task ? (
       <div className="grid2">

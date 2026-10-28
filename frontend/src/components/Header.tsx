@@ -19,7 +19,8 @@ interface Props {
   activeProvider: string;
   socket: SocketState;
   stopReport: StopReport | null;
-  busy: boolean;
+  /** True only while the e-stop request itself is in flight; other work never disables E-STOP. */
+  stopping: boolean;
   onSelectProvider: (id: string) => void;
   onEStop: () => void;
   onDisconnect: () => void;
@@ -68,7 +69,7 @@ export function Header(p: Props) {
             {" · max |q̇| "}{p.stopReport.max_joint_velocity ?? "n/a"} rad/s · {p.stopReport.source}
           </span>
         )}
-        <button type="button" className="btn btn--estop" onClick={p.onEStop} disabled={p.busy}
+        <button type="button" className="btn btn--estop" onClick={p.onEStop} disabled={p.stopping}
                 aria-label="Emergency stop">E-STOP</button>
         <button type="button" className="btn btn--ghost" onClick={p.onDisconnect}>Disconnect</button>
       </div>

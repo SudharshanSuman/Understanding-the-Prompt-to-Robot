@@ -31,6 +31,13 @@ the CSP `connect-src`. Never put a token or key in a `VITE_` variable: it would 
 bundle. To serve the console from another origin, add that origin to the backend's
 `MD_ALLOWED_ORIGINS`.
 
+## Desktop mode
+
+`../desktop` wraps this same `dist/` build in Electron (see `../desktop/README.md`). There, the
+preload bridge `window.mdDesktop` hands the page the backend URL and a per-launch token, and the
+page connects without the Connect screen. In a normal browser the bridge is absent and nothing
+changes (`src/desktop.ts`).
+
 ## Honesty rules the UI follows
 
 - ROS-backed panels (Spatial, Motion Planning, ROS 2 Topics, Robot State, Verification) show what
