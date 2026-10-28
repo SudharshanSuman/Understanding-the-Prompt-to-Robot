@@ -1,0 +1,59 @@
+# Munder Difflin .gitignore — covers SECURITY_FINDINGS.md §3.1 (SEC-004 / S1)
+
+# Environment & secrets (placeholders only in .env.example)
+.env
+.env.*
+**/.env.local
+!.env.example
+!**/.env.example
+*.key
+*.pem
+*.secret
+secrets/
+config/secrets/
+docker-compose.override.yml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.log
+
+# Node / Electron / frontend build output
+node_modules/
+.next/
+dist/
+out/
+build/
+*.tsbuildinfo
+.vite/
+
+# Source maps (never ship to production — SEC-014)
+*.map
+
+# ROS 2 workspace build artifacts
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+log/
+
+# Test and QA run output
+reports/
+
+# IDE / OS
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local agent tooling (not part of the product)
+.claude/

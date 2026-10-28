@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Local pre-commit secret scan (SEC-004 / S8). Offline: git + grep + awk only, no network.
+# Scans only lines ADDED in the staged diff. Never prints the matched text, only file:line + rule.
+# Per-line escape for a deliberate false positive: add the comment  secret-scan: allow
+# Enable (once per clone):  git config core.hooksPath .githooks
+set -u
+fail=0
+report() { printf 'secret-scan: BLOCKED  %s  (%s)\n' "$1" "$2" >&2; fail=1; }
+
+# 1) Block files that should never be committed, by name.
+while IFS= read -r f; do
+  case "$f" in
+    .env.example|*/.env.example) ;;
+    .env|.env.*|*/.env|*/.env.*|*.key|*.pem|*.secret|secrets/*|*/secrets/*|id_rsa|id_ed25519|*/id_rsa|*/id_ed25519)
+      report "$f" "forbidden file name" ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+# 2) Added lines as "path:line:text" (one pass), skipping .env.example (names only) and allow-marked lines.
+added="$(git diff --cached -U0 --no-color --diff-filter=ACMR | awk '
+  /^\+\+\+ b\// { file = substr($0, 7); next }
+  /^\+\+\+ /    { file = ""; next }
+  /^@@ /        { split($3, a, ","); line = substr(a[1], 2) + 0; next }
+  /^\+/         { if (file != "" && file !~ /(^|\/)\.env\.example$/ && index($0, "secret-scan: allow") == 0) print file ":" line ":" substr($0, 2); line++ }
+')"
+
+scan() { # label regex
+  local hits
+  hits="$(grep -E -e "$2" <<<"$added" | cut -d: -f1,2 | sort -u)"
+  if [ -n "$hits" ]; then while IFS= read -r h; do report "$h" "$1"; done <<<"$hits"; fi
+}
+
+if [ -n "$added" ]; then
+  scan "sk-style API key"        '\bsk-[A-Za-z0-9_-]{24,}'
+  scan "NVIDIA API key"          '\bnvapi-[A-Za-z0-9_-]{20,}'
+  scan "AWS access key id"       '\bAKIA[0-9A-Z]{16}\b'
+  scan "GitHub token"            '\bgh[pousr]_[A-Za-z0-9]{30,}'
+  scan "Slack token"             '\bxox[abprs]-[A-Za-z0-9-]{10,}'
+  scan "Google API key"          '\bAIza[0-9A-Za-z_-]{35}\b'
+  scan "private key block"       '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----'
+  scan "hard-coded credential"   '(API_KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Za-z0-9_]*["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_/+=.-]{20,}'
+  scan "Dockerfile ENV secret"   '^[^:]*:[0-9]+:[[:space:]]*(ENV|ARG)[[:space:]]+[A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]*[ =][^$[:space:]]+'
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "secret-scan: commit aborted. Remove the secret (use environment variables), or mark a false positive with 'secret-scan: allow'." >&2
+  exit 1
+fi
+exit 0

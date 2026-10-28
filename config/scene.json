@@ -1,0 +1,17 @@
+{
+  "_comment": "Spec scene (project-spec s6/s19). Poses and reachability are null until the Gazebo scene / perception interface supplies them; null reachability means MoveIt IK must confirm before execution.",
+  "objects": [
+    {"id": "red_cube", "type": "cube", "color": "red", "aliases": ["red block"], "pose": null, "reachable": null},
+    {"id": "blue_cube", "type": "cube", "color": "blue", "aliases": ["blue block"], "pose": null, "reachable": null},
+    {"id": "green_cylinder", "type": "cylinder", "color": "green", "pose": null, "reachable": null},
+    {"id": "storage_box", "type": "box", "aliases": ["storage box"], "graspable": false, "pose": null, "reachable": null},
+    {"id": "platform", "type": "platform", "aliases": ["marked platform"], "graspable": false, "pose": null, "reachable": null},
+    {"id": "table", "type": "table", "aliases": ["work table"], "graspable": false, "pose": null, "reachable": null}
+  ],
+  "destinations": [
+    {"id": "storage_box", "aliases": ["storage box", "box"], "pose": null, "reachable": null},
+    {"id": "platform", "aliases": ["marked platform", "platform"], "pose": null, "reachable": null},
+    {"id": "table_left", "aliases": ["left side of the table", "left side of table", "left side", "table left", "left zone"], "pose": null, "reachable": null},
+    {"id": "table_right", "aliases": ["right side of the table", "right side of table", "right side", "table right", "right zone"], "pose": null, "reachable": null}
+  ]
+}
