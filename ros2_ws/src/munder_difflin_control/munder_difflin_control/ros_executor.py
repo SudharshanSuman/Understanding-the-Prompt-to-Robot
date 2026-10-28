@@ -552,7 +552,7 @@ class RosExecutor(Executor):
             return is_cancelled() or task.task_id in self._cancelled
 
         try:
-            if not self._primed and not self._latched:
+            if not self._primed and not self._latched and not os.environ.get('MD_NO_PRIME'):   # MD_NO_PRIME=1: probe without the workaround
                 # Measured on a fresh sim start: without a reset the first task aborts on path tolerance (a joint does
                 # not break away on the first fast move); with one reset beforehand it completes. Cause not isolated.
                 self._primed = True
