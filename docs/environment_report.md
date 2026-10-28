@@ -15,7 +15,7 @@
 | OS / ROS 2 Jazzy / Gazebo Harmonic / `ros_gz` | READY (Ubuntu 24.04.5, Jazzy desktop 0.11.0, `gz sim` 8.15.0, ros_gz 1.0.24) |
 | MoveIt 2, `ros2_control`, controllers, `gz_ros2_control` | READY — installed (MoveIt 2.12.4, ros2_control 4.48.1, ros2_controllers 4.42.1, gz_ros2_control 1.2.20). Was the BLOCKER in the first audit |
 | Robot description (Panda / UR5e fallback) | READY — `moveit_resources_panda_*` 3.1.0, `ur_description` 3.5.1, `ur_simulation_gz` 2.5.0, `ur_moveit_config`, `ur_controllers` installed |
-| Franka's own packages | Source checkout only, not built — `ros2_ws/src/franka_ros2` (tag v3.6.1) and `ros2_ws/src/franka_description` (tag 2.9.0) exist (Andy's work). No apt candidate exists. `colcon build` **not executed** (see RELEASE_CHECKLIST §4a) |
+| Franka's own packages | Not used (decided 2026-10-28): the sim runs on the apt Panda packages; no `franka_ros2`, `franka_description` or `libfranka`. `colcon build` of the project workspace **not executed** by REL (see RELEASE_CHECKLIST §4a) |
 | NVIDIA GPU | **WARNING (accepted)** — RTX 3050 Mobile, no driver (`nouveau` loaded; no `nvidia-smi`, no `nvcc`). Human decided to skip the driver install; local GPU inference is out of scope. Gazebo uses Mesa on the AMD iGPU or software rendering |
 | Python backend (FastAPI) | READY — `backend/.venv` (Python 3.12.3): fastapi 0.162.0, uvicorn 0.54.0, websockets 17.2, pydantic 2.14.1, starlette 1.10.0, pytest 9.1.1. Not on the system Python (ADR-005 isolation; the audit checks system Python so it still shows these as missing) |
 | Frontend (Node) | READY — Node v20.20.2, npm 10.8.2; `frontend/package-lock.json` and `desktop/package-lock.json` exist |
@@ -51,7 +51,7 @@ Versions are exactly as the script printed them.
 | Panda: `moveit_resources_panda_description` / `_moveit_config` | PRESENT | 3.1.0 |
 | UR5e fallback: `ur_description`, `ur_simulation_gz`, `ur_moveit_config`, `ur_controllers`, `ur_msgs`, `ur_dashboard_msgs` | PRESENT | `ur_description` 3.5.1, `ur_simulation_gz` 2.5.0 (others installed; versions not printed by the script) |
 | `ros-jazzy-ur` meta | MISSING (not needed) | apt candidate 3.9.0 — the individual UR packages are installed |
-| Franka (`franka_ros2`, `franka_description`) | SOURCE ONLY | not apt; checkouts in `ros2_ws/src` (3.6.1 / 2.9.0), unbuilt. Not seen by `ros2 pkg list` until built |
+| Franka (`franka_ros2`, `franka_description`) | NOT USED | no apt candidate and not needed; dropped by decision |
 | Kinova | MISSING | not in the chosen design |
 | Existing ROS workspaces | INFO | `~/apriltag_ws ~/colcon_ws ~/ros2_ws ~/turtlebot3_ws` exist (not inspected or touched) |
 | Python (system) | PRESENT | 3.12.3, pip 24.0, venv OK; numpy 1.26.4, scipy 1.11.4, cv2 4.6.0, PyYAML 6.0.1 |
@@ -74,7 +74,7 @@ Versions are exactly as the script printed them.
 3. **GPU**: `nouveau` only; Gazebo rendering falls to Mesa. Accepted by the human; revisit only if rendering is too slow.
 4. **Disk is 83% used (37 GB free).** The ROS install consumed space; Docker images and a Franka build add more. Keep an eye on it before any `colcon build` (build and install dirs are git-ignored).
 5. **Overlay masking.** Four other ROS workspaces live in `$HOME`. Source this project's overlay in a clean shell (`env -i` or a fresh terminal without `~/ros2_ws` sourced) so they do not shadow it.
-6. **Nested git repositories (decided 2026-10-28).** `ros2_ws/src/franka_ros2` and `ros2_ws/src/franka_description` each contain their own `.git`. A plain `git add ros2_ws` would record them as embedded repos, not as source. They are **untracked and not committed**. Andy and the Boss need to choose one of: a `.repos` file for `vcs import`, git submodules, or ignoring them and documenting the tags. Decision (god): pinned `ros2_ws/munder_difflin.repos` + `vcs import`; checkout paths and `ros2_ws/logs/` are in `.gitignore`; no submodules. Andy writes the `.repos` file. The checkouts were no longer in `ros2_ws/src` when last looked at.
+6. **Third-party sources.** None today: the Franka checkouts are gone and `ros2_ws/src` holds only `munder_difflin_*` packages. `.gitignore` still lists the old Franka paths (harmless). A source dependency, if added, is pinned in `ros2_ws/munder_difflin.repos` with `vcs import`; no nested `.git`, no submodules.
 7. **Port 8080** is taken; the backend uses 8000, which is free.
 
 ## 4. Install commands still open (for the human; NOT run by REL)

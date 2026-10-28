@@ -18,8 +18,6 @@ Legend — **Installed** = seen on this machine. **Pin** = version the project c
 | MoveIt 2 (`ros-jazzy-moveit`, `moveit_servo`, `moveit_setup_assistant`, OMPL planners, kinematics) | Motion planning | 2.12.4 | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Robotics |
 | `moveit_resources_panda_description` + `_moveit_config` | Primary arm (ADR-006) | 3.1.0 | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Robotics |
 | `ur_description` / `ur_simulation_gz` / `ur_moveit_config` / `ur_controllers` | Fallback arm UR5e (ADR-006) | 3.5.1 / 2.5.0 / installed / installed | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Robotics |
-| `franka_ros2` | Franka-specific controllers and Gazebo support | not present in `ros2_ws/src` at 2026-10-28 (earlier checkout was v3.6.1) | tag v3.6.1 | git via `ros2_ws/munder_difflin.repos` + `vcs import` (decided; Andy writes the file; no submodules) | Robotics / Andy |
-| `franka_description` | Franka URDF/meshes | not present in `ros2_ws/src` at 2026-10-28 (earlier checkout was 2.9.0) | tag 2.9.0 | git via `ros2_ws/munder_difflin.repos` (pinned) | Robotics / Andy |
 | `joint_state_publisher_gui` | Dev convenience | 2.4.3 | — | apt | Robotics |
 | `rviz2`, `xacro`, `robot_state_publisher`, `tf2_ros` | Visualisation / URDF | 14.1.24 / 2.1.1 / 3.3.4 / 0.36.23 | — | apt (part of desktop) | Robotics |
 | `colcon`, `rosdep` | Build / deps | 0.3.0-100 / 0.27.0 | — | apt | REL |
@@ -73,5 +71,5 @@ Lockfiles: 18 packages (runtime) / 23 (dev), sha256-pinned, linux x86_64 / CPyth
 2. System packages are installed only by the human via the commands in `docs/environment_report.md` §4; agents do not run `sudo`.
 3. No `curl | bash` installers; downloads need a published checksum (SEC-008).
 4. Re-run `scripts/audit_env.sh` after any install and refresh the "Installed" column.
-5. Third-party source checkouts (Franka) are pinned by tag in a committed manifest, not committed as nested git repositories.
+5. No third-party source checkouts today (Franka dropped; Panda comes from apt). If one is added, pin it by tag + commit SHA in `ros2_ws/munder_difflin.repos` and fetch with `vcs import`; never commit a nested `.git`.
 6. License review per dependency: TBD (Legal/QA).
