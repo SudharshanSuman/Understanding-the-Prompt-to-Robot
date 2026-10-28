@@ -39,7 +39,7 @@ Versions are exactly as the script printed them.
 | rviz2, xacro, robot_state_publisher, tf2_ros, image_transport, cv_bridge | PRESENT | 14.1.24, 2.1.1, 3.3.4, 0.36.23, 5.1.8, 4.1.0 |
 | `joint_state_publisher_gui` | PRESENT | 2.4.3 (was missing) |
 | `rmw_cyclonedds_cpp` | MISSING (optional) | apt candidate 2.2.4 |
-| `rosbridge_server` | MISSING (optional) | apt candidate 2.7.1; architecture uses FastAPI + WebSocket, not rosbridge. **Needed only if the backend talks to ROS through rosbridge** — Andy to confirm |
+| `rosbridge_server` | MISSING (optional) | apt candidate 2.7.1; architecture uses FastAPI + WebSocket, not rosbridge. Decided not needed: the backend uses rclpy in-process via the Executor |
 | `nav2_bringup` | MISSING (optional) | apt candidate 1.3.13; not in the design |
 | Gazebo (`gz sim`) | PRESENT | 8.15.0 (Harmonic) at `/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz` |
 | `ros_gz_sim`, `_bridge`, `_interfaces`, `_image`, `ros_gz` | PRESENT | all 1.0.24 |
@@ -74,7 +74,7 @@ Versions are exactly as the script printed them.
 3. **GPU**: `nouveau` only; Gazebo rendering falls to Mesa. Accepted by the human; revisit only if rendering is too slow.
 4. **Disk is 83% used (37 GB free).** The ROS install consumed space; Docker images and a Franka build add more. Keep an eye on it before any `colcon build` (build and install dirs are git-ignored).
 5. **Overlay masking.** Four other ROS workspaces live in `$HOME`. Source this project's overlay in a clean shell (`env -i` or a fresh terminal without `~/ros2_ws` sourced) so they do not shadow it.
-6. **Nested git repositories.** `ros2_ws/src/franka_ros2` and `ros2_ws/src/franka_description` each contain their own `.git`. A plain `git add ros2_ws` would record them as embedded repos, not as source. They are **untracked and not committed**. Andy and the Boss need to choose one of: a `.repos` file for `vcs import`, git submodules, or ignoring them and documenting the tags. REL recommends the `.repos` file (pinned tags v3.6.1 / 2.9.0, no nested `.git` committed).
+6. **Nested git repositories (decided 2026-10-28).** `ros2_ws/src/franka_ros2` and `ros2_ws/src/franka_description` each contain their own `.git`. A plain `git add ros2_ws` would record them as embedded repos, not as source. They are **untracked and not committed**. Andy and the Boss need to choose one of: a `.repos` file for `vcs import`, git submodules, or ignoring them and documenting the tags. Decision (god): pinned `ros2_ws/munder_difflin.repos` + `vcs import`; checkout paths and `ros2_ws/logs/` are in `.gitignore`; no submodules. Andy writes the `.repos` file. The checkouts were no longer in `ros2_ws/src` when last looked at.
 7. **Port 8080** is taken; the backend uses 8000, which is free.
 
 ## 4. Install commands still open (for the human; NOT run by REL)

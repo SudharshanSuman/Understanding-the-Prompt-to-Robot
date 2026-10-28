@@ -11,19 +11,19 @@ Legend — **Installed** = seen on this machine. **Pin** = version the project c
 | Ubuntu 24.04 (noble) | Host OS | 24.04.5 | 24.04 LTS | OS | REL |
 | ROS 2 Jazzy | Middleware | `ros-jazzy-desktop` 0.11.0 | jazzy | apt (packages.ros.org) | Architect |
 | Gazebo Harmonic (`gz sim`) | Simulator | 8.15.0 | Harmonic (8.x) | apt (ROS vendor pkgs) | Architect |
-| `ros_gz_sim`, `_bridge`, `_interfaces`, `_image` | ROS↔Gazebo bridge | 1.0.24 | TBD | apt | Architect |
-| `gz_ros2_control` | Sim hardware interface | 1.2.20 | TBD | apt | Robotics |
-| `ros2_control`, `controller_manager`, `hardware_interface` | Control framework | 4.48.1 | TBD | apt | Robotics |
-| `ros2_controllers` (+ `joint_state_broadcaster`, `joint_trajectory_controller`, position/velocity/effort/gripper/forward_command/diff_drive) | Joint and gripper controllers | 4.42.1 | TBD | apt | Robotics |
-| MoveIt 2 (`ros-jazzy-moveit`, `moveit_servo`, `moveit_setup_assistant`, OMPL planners, kinematics) | Motion planning | 2.12.4 | TBD | apt | Robotics |
-| `moveit_resources_panda_description` + `_moveit_config` | Primary arm (ADR-006) | 3.1.0 | TBD | apt | Robotics |
-| `ur_description` / `ur_simulation_gz` / `ur_moveit_config` / `ur_controllers` | Fallback arm UR5e (ADR-006) | 3.5.1 / 2.5.0 / installed / installed | TBD | apt | Robotics |
-| `franka_ros2` | Franka-specific controllers and Gazebo support | source checkout v3.6.1, **unbuilt** (`ros2_ws/src/franka_ros2`) | tag v3.6.1 | git (no apt candidate) — vendoring method undecided, see report §3 item 6 | Robotics / Andy |
-| `franka_description` | Franka URDF/meshes | source checkout 2.9.0, **unbuilt** (`ros2_ws/src/franka_description`) | tag 2.9.0 | git (no apt candidate) | Robotics / Andy |
+| `ros_gz_sim`, `_bridge`, `_interfaces`, `_image` | ROS↔Gazebo bridge | 1.0.24 | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Architect |
+| `gz_ros2_control` | Sim hardware interface | 1.2.20 | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Robotics |
+| `ros2_control`, `controller_manager`, `hardware_interface` | Control framework | 4.48.1 | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Robotics |
+| `ros2_controllers` (+ `joint_state_broadcaster`, `joint_trajectory_controller`, position/velocity/effort/gripper/forward_command/diff_drive) | Joint and gripper controllers | 4.42.1 | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Robotics |
+| MoveIt 2 (`ros-jazzy-moveit`, `moveit_servo`, `moveit_setup_assistant`, OMPL planners, kinematics) | Motion planning | 2.12.4 | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Robotics |
+| `moveit_resources_panda_description` + `_moveit_config` | Primary arm (ADR-006) | 3.1.0 | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Robotics |
+| `ur_description` / `ur_simulation_gz` / `ur_moveit_config` / `ur_controllers` | Fallback arm UR5e (ADR-006) | 3.5.1 / 2.5.0 / installed / installed | = installed version (apt, Jazzy; hold with `apt-mark hold` if drift is a concern) | apt | Robotics |
+| `franka_ros2` | Franka-specific controllers and Gazebo support | not present in `ros2_ws/src` at 2026-10-28 (earlier checkout was v3.6.1) | tag v3.6.1 | git via `ros2_ws/munder_difflin.repos` + `vcs import` (decided; Andy writes the file; no submodules) | Robotics / Andy |
+| `franka_description` | Franka URDF/meshes | not present in `ros2_ws/src` at 2026-10-28 (earlier checkout was 2.9.0) | tag 2.9.0 | git via `ros2_ws/munder_difflin.repos` (pinned) | Robotics / Andy |
 | `joint_state_publisher_gui` | Dev convenience | 2.4.3 | — | apt | Robotics |
 | `rviz2`, `xacro`, `robot_state_publisher`, `tf2_ros` | Visualisation / URDF | 14.1.24 / 2.1.1 / 3.3.4 / 0.36.23 | — | apt (part of desktop) | Robotics |
 | `colcon`, `rosdep` | Build / deps | 0.3.0-100 / 0.27.0 | — | apt | REL |
-| `rosbridge_server` | ROS↔web bridge | **not installed** (cand. 2.7.1) | not planned (architecture uses FastAPI + WebSocket) | apt, human-approved | Architect to confirm |
+| `rosbridge_server` | ROS↔web bridge | **not installed** (cand. 2.7.1) | **not used** — decided: rclpy in-process via the Executor, no rosbridge | — | Architect |
 | `rmw_cyclonedds_cpp`, `moveit_visual_tools` | Optional | not installed (cand. 2.2.4 / 4.2.0) | not planned | apt | Robotics |
 | NVIDIA driver | GPU compute/render | **not installed** — human decided to skip; local GPU inference is out of scope | n/a | — | REL |
 
