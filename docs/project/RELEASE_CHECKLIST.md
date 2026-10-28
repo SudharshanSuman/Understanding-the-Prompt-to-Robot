@@ -49,7 +49,7 @@ Desktop shell decision: **Electron** (no Rust / WebKitGTK installs). No `package
 - [ ] Python dependency audit — `backend/requirements.txt` exists; tool (`pip-audit`) not installed; **not executed**
 - [ ] Production frontend build has no source maps — `*.map` is git-ignored; build config must set `sourcemap: false` for production; **not executed** (check `find dist -name '*.map'` is empty)
 - [ ] Electron settings (SEC-015): `nodeIntegration: false`, `contextIsolation: true`, `webSecurity: true`, preload via `contextBridge`, CSP limited to `http://localhost:8000` and `ws://localhost:8000` — review when `main.js` exists; **not executed**
-- [x] Python lockfile: `backend/requirements.lock` (pip freeze of `backend/.venv`, 2026-10-28; closes SEC-004-D1 for now). It includes dev packages (pytest) and has no hashes. Regenerate when `requirements*.txt` changes. ROS dependencies via `rosdep`: TBD
+- [x] Python lockfiles, hash-pinned (SEC-004-D1): `backend/requirements.lock` (production, 18 packages) and `backend/requirements-dev.lock` (adds pytest etc., 23 packages), built from `backend/.venv` versions with sha256 of the PyPI wheels (linux x86_64, CPython 3.12). Verified in a throwaway venv outside the repo: `pip install --require-hashes --no-deps --no-index --find-links <downloaded wheels> -r requirements-dev.lock` succeeded and `pip check` reported no broken requirements; a deliberately corrupted hash was rejected (exit 1, nothing installed). Nothing was installed system-wide. Regenerate when `requirements*.txt` changes or on another platform. ROS dependencies via `rosdep`: TBD
 - [ ] Clean build from a fresh clone: command ____ · result ____
 - [ ] `colcon build` of `ros2_ws/` clean — `ros2_ws/src` is empty today: ____
 
