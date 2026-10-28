@@ -7,6 +7,7 @@ HAND_LINK = 'panda_hand'
 ARM_JOINTS = [f'panda_joint{i}' for i in range(1, 8)]
 READY = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
 GRIP_CENTER_BELOW_HAND = 0.095  # object centre is this far below the panda_hand origin when grasped
+FINGER_JOINTS = ['panda_finger_joint1', 'panda_finger_joint2']
 FINGER_OPEN = 0.04  # panda_finger_joint1 travel per finger (m)
 
 # id -> dict(shape, size/radius+height, init xyz, grip half-width = finger position when closed on it)

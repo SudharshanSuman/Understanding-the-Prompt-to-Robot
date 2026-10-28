@@ -19,6 +19,7 @@ def generate_launch_description():
     # xacro python API: the workspace path contains spaces, which break a shell-split Command
     robot_description = xacro.process_file(xacro_file).toxml()
     worlds_dir = os.path.dirname(world)
+    dds_local = [SetEnvironmentVariable('ROS_LOCALHOST_ONLY', '1'), SetEnvironmentVariable('ROS_AUTOMATIC_DISCOVERY_RANGE', 'LOCALHOST')]  # SEC-011-D1
     gz_env = SetEnvironmentVariable('GZ_SIM_RESOURCE_PATH', worlds_dir + os.pathsep + os.environ.get('GZ_SIM_RESOURCE_PATH', ''))
 
     # -s = server only (no GUI, no rendering): light on RAM. gz_server.sh keeps gz in its own process group so
@@ -66,5 +67,5 @@ def generate_launch_description():
         DeclareLaunchArgument('headless', default_value='true', description='gz server only (no Gazebo GUI)'),
         DeclareLaunchArgument('rviz', default_value='false'),
         DeclareLaunchArgument('render', default_value='auto', description='auto (AMD/Mesa hardware) | software (LIBGL_ALWAYS_SOFTWARE)'),
-        gz_env, gz_headless, gz_gui, *shutdown_on_gz_exit, rsp, clock, gz_bridge, spawn, *chain, rviz_node,
+        *dds_local, gz_env, gz_headless, gz_gui, *shutdown_on_gz_exit, rsp, clock, gz_bridge, spawn, *chain, rviz_node,
     ])

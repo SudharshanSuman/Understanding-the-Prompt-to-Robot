@@ -7,6 +7,8 @@ WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"   # <repo>/ros2_w
 [ -f "$WS/install/setup.bash" ] || WS="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../../.." && pwd)"
 source "$WS/install/setup.bash"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
+export ROS_LOCALHOST_ONLY=1 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # DDS stays on this machine (SEC-011-D1)
+[ -x "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/setup_pylib.sh" ] && "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/setup_pylib.sh"
 LOG="${SMOKE_LOG_DIR:-$WS/logs}"; mkdir -p "$LOG"
 LAUNCH=sim.launch.py; [ "$1" = "--moveit" ] && LAUNCH=moveit.launch.py
 SL="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/sim_lock.sh"

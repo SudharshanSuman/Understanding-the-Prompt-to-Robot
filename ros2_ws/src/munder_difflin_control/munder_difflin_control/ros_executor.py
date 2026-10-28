@@ -10,11 +10,16 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
 import subprocess
 import threading
 import time
 from collections.abc import Callable
+
+# DDS must not leave this machine (SEC-011-D1); set before rclpy.init()
+os.environ['ROS_LOCALHOST_ONLY'] = '1'
+os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
 
 import rclpy
 from builtin_interfaces.msg import Duration
@@ -115,16 +120,18 @@ class RosExecutor(Executor):
         self._lock = threading.Lock()
         self._run_lock = threading.Lock()
         self._latched = False
+        self._primed = False   # see execute()
         self._cancelled: set[str] = set()
         self._goals: list = []
         self._state = 'IDLE'
         self._stage = ''
         self._task_id = ''
         self._held = ''
-        self._node.create_timer(0.2, self._publish_telemetry)
-        # ROS-side e-stop/reset (INTERFACE_CONTRACTS s8) while a RosExecutor is alive
+        self._phase = ''
+        self._node.create_timer(0.1, self._publish_telemetry)   # 10 Hz
+        # ROS-side e-stop while a RosExecutor is alive. There is deliberately NO ROS reset service (SEC-013-D1):
+        # stopping is always safe, clearing the latch is only possible through the authenticated HTTP API.
         self._node.create_service(Trigger, '/munder_difflin/safety/emergency_stop', self._srv_estop, callback_group=ReentrantCallbackGroup())
-        self._node.create_service(Trigger, '/munder_difflin/safety/reset', self._srv_reset, callback_group=ReentrantCallbackGroup())
 
     # ------------------------------------------------------------------ helpers
     def _spin(self):
@@ -152,6 +159,13 @@ class RosExecutor(Executor):
         return {'move_action': n.mg.server_is_ready(), 'arm_controller': n.arm.server_is_ready(),
                 'gripper_controller': n.grip.server_is_ready(), 'joint_states': time.time() - n.js_wall < 2.0}
 
+    def readiness(self) -> dict[str, bool]:
+        """Non-blocking, never raises (backend /health): move_action, arm_controller, gripper_controller, fresh joint_states."""
+        try:
+            return self._servers_ready()
+        except Exception:
+            return {'move_action': False, 'arm_controller': False, 'gripper_controller': False, 'joint_states': False}
+
     @staticmethod
     def _num(v):
         return round(v, 4) if isinstance(v, float) and math.isfinite(v) else None  # NaN/inf -> null
@@ -162,13 +176,19 @@ class RosExecutor(Executor):
             n = self._node
             if not n.pos:
                 return None
-            return {'time': time.time(), 'source': 'ros2_gazebo', 'perception': PERCEPTION_SOURCE,
-                    'task_id': self._task_id, 'stage': self._stage, 'state': self._state,
+            return {'time': time.time(), 'sim_time': self._num(n.get_clock().now().nanoseconds * 1e-9),
+                    'source': 'ros2_gazebo', 'perception': PERCEPTION_SOURCE,
+                    'task_id': self._task_id, 'stage': self._stage, 'phase': self._phase, 'state': self._state,
                     'e_stop_latched': self._latched, 'held_object': self._held,
                     'joints': {j: self._num(n.pos.get(j, float('nan'))) for j in S.ARM_JOINTS},
+                    'fingers': {f: self._num(n.pos.get(f, float('nan'))) for f in S.FINGER_JOINTS},
                     'max_arm_joint_velocity': self._num(max((abs(n.vel.get(j, 0.0)) for j in S.ARM_JOINTS), default=0.0)),
                     'gripper_opening_m': self._num(n.pos.get('panda_finger_joint1', float('nan')) * 2),
-                    'objects': {o: [self._num(v) for v in n.poses[o][0]] for o in list(n.poses)}}
+                    'objects': {o: [self._num(v) for v in n.poses[o][0]] for o in list(n.poses)},
+                    'object_poses': {o: {'position': [self._num(v) for v in n.poses[o][0]],
+                                         'orientation_xyzw': [self._num(v) for v in n.poses[o][1]]}
+                                     for o in list(n.poses)},
+                    'attached': {o: bool(v) for o, v in list(n.attached.items())}}
         except Exception:
             return None
 
@@ -183,11 +203,6 @@ class RosExecutor(Executor):
     def _srv_estop(self, _req, res):
         rep = self.emergency_stop()
         res.success, res.message = rep.status == 'e_stop_confirmed', rep.model_dump_json()
-        return res
-
-    def _srv_reset(self, _req, res):
-        st = self.reset()
-        res.success, res.message = not st.e_stop_latched, st.model_dump_json()
         return res
 
     # ------------------------------------------------------------------ Executor API
@@ -346,7 +361,7 @@ class RosExecutor(Executor):
             prev = p.positions
         return JointTrajectory(joint_names=jt.joint_names, points=out)
 
-    def _mg_goal(self, constraints: Constraints, plan_only: bool, vel=0.4):
+    def _mg_goal(self, constraints: Constraints, plan_only: bool, vel=0.25):
         g = MoveGroup.Goal()
         r = g.request
         r.group_name = 'panda_arm'
@@ -530,12 +545,18 @@ class RosExecutor(Executor):
             nonlocal stage
             stage = st
             self._stage = st
+            self._phase = msg
             emit(PipelineStageEvent(run_id=task.task_id, stage=st, state=state, message=msg, detail=detail))
 
         def cancel_cb() -> bool:
             return is_cancelled() or task.task_id in self._cancelled
 
         try:
+            if not self._primed and not self._latched:
+                # Measured on a fresh sim start: without a reset the first task aborts on path tolerance (a joint does
+                # not break away on the first fast move); with one reset beforehand it completes. Cause not isolated.
+                self._primed = True
+                self.reset()
             self._run(task, ev, cancel_cb)
             self._state = 'IDLE'
         except _Cancelled:

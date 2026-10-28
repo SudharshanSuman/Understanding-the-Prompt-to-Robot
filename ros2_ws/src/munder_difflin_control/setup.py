@@ -10,6 +10,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
     ],
     install_requires=['setuptools'],
+    tests_require=['pytest'],
+    extras_require={'test': ['pytest']},
     zip_safe=True,
     maintainer='Andy',
     maintainer_email='andy@munder.difflin',

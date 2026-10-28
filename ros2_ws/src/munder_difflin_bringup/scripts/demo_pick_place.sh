@@ -14,6 +14,8 @@ WS="$(cd "$(dirname "$SRC")/../../.." && pwd)"
 source "$WS/install/setup.bash"
 BE="$(cd "$WS/../backend" && pwd)"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
+export ROS_LOCALHOST_ONLY=1 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # DDS stays on this machine (SEC-011-D1)
+[ -x "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/setup_pylib.sh" ] && "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/setup_pylib.sh"
 LOG="$WS/logs"; mkdir -p "$LOG"
 SL="$WS/src/munder_difflin_bringup/scripts/sim_lock.sh"
 "$SL" acquire MD-ROS-demo || exit 3

@@ -22,13 +22,13 @@ panda_arm_controller:
     constraints:  # a goal outside the reachable range now ends GOAL_TOLERANCE_VIOLATED instead of SUCCEEDED
       stopped_velocity_tolerance: 0.05
       goal_time: 1.0
-      panda_joint1: {trajectory: 0.15, goal: 0.02}
-      panda_joint2: {trajectory: 0.15, goal: 0.02}
-      panda_joint3: {trajectory: 0.15, goal: 0.02}
-      panda_joint4: {trajectory: 0.15, goal: 0.02}
-      panda_joint5: {trajectory: 0.15, goal: 0.02}
-      panda_joint6: {trajectory: 0.15, goal: 0.02}
-      panda_joint7: {trajectory: 0.15, goal: 0.02}
+      panda_joint1: {trajectory: 0.60, goal: 0.02}
+      panda_joint2: {trajectory: 0.60, goal: 0.02}
+      panda_joint3: {trajectory: 0.60, goal: 0.02}
+      panda_joint4: {trajectory: 0.60, goal: 0.02}
+      panda_joint5: {trajectory: 0.60, goal: 0.02}
+      panda_joint6: {trajectory: 0.60, goal: 0.02}
+      panda_joint7: {trajectory: 0.60, goal: 0.02}
 
 panda_hand_controller:
   ros__parameters:

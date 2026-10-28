@@ -5,9 +5,15 @@
 
 Uses app.main.main(), so MD_BIND_HOST (loopback by default) / MD_ALLOW_REMOTE checks and APP_PORT apply.
 """
-from app.main import main
+import os
 
-from .ros_executor import RosExecutor
+# DDS stays on this machine (SEC-011-D1); set before anything imports rclpy
+os.environ['ROS_LOCALHOST_ONLY'] = '1'
+os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
+
+from app.main import main  # noqa: E402
+
+from .ros_executor import RosExecutor  # noqa: E402
 
 
 def run():
