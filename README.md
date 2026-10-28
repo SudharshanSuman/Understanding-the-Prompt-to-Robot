@@ -67,7 +67,7 @@ Every command flows through 14 inspectable stages surfaced live over WebSocket:
 |---|---|---|
 | **Operating System** | Ubuntu 24.04 LTS (Noble Numbat) | Host OS for ROS 2 Jazzy & Gazebo Harmonic |
 | **ROS 2** | Jazzy Jalisco (`ros-jazzy-desktop` or base) | Robot middleware & node communication |
-| **Simulator** | Gazebo Harmonic 8.15+ (`gz sim`) | Physics simulation and sensor rendering |
+| **Simulator** | Gazebo Harmonic (`gz sim` 8.15.0) | Physics simulation and sensor rendering |
 | **Motion Planning** | MoveIt 2 (`ros-jazzy-moveit`) | Inverse kinematics & trajectory planning |
 | **Python** | Python 3.12+ | Backend runtime, validation, and ROS node |
 | **Node.js** | Node.js 20.x + npm | Frontend dashboard and Electron desktop app |
@@ -104,14 +104,14 @@ munder_difflin/
 │   ├── app/            # Application logic (api, schemas, providers, validation)
 │   ├── requirements.txt # Production Python dependencies
 │   └── requirements.lock# Hash-pinned reproducible lockfile
-├── frontend/           # React + Vite + Tailwind operator console
+├── frontend/           # React 19 + TypeScript + Vite + three.js operator console
 │   └── src/            # FlowView, ArmView3D, SceneView, socket telemetry
 ├── desktop/            # Electron wrapper with secure preload IPC bridge
 ├── ros2_ws/            # ROS 2 workspace
 │   └── src/
 │       ├── munder_difflin_description/  # Robot URDF/xacro and controller YAML
 │       ├── munder_difflin_gazebo/       # Gazebo simulation worlds and models
-│       ├── munder_difflin_moveit/       # MoveIt 2 SRDF and kinematics configs
+│       ├── munder_difflin_moveit_config/# MoveIt 2 SRDF and kinematics configs
 │       ├── munder_difflin_bringup/      # Launch scripts, smoke tests, and probes
 │       └── munder_difflin_control/      # In-process RosExecutor & bridge
 ├── scripts/            # Launchers: demo.sh, demo_cli.sh, setup_pylib.sh
@@ -125,14 +125,14 @@ munder_difflin/
 
 ### 1. Python Environment Setup
 
-Install dependencies using the root `requirements.txt`:
+Install dependencies into `backend/.venv`:
 
 ```bash
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
+# From the repository root:
+python3 -m venv backend/.venv
+source backend/.venv/bin/activate
 
-# Standard install
+# Standard install:
 pip install -r requirements.txt
 
 # Or for development and testing:
@@ -216,7 +216,7 @@ When `scripts/demo.sh` is already running in another terminal, submit instructio
 ```bash
 ./scripts/demo_cli.sh "Pick up the red cube and place it in the storage box"
 ```
-The script reads the active session token automatically from `~/.cache/munder_difflin/munder_difflin_demo.token`, streams pipeline stage progress, and exits 0 on success.
+The script reads the active session token automatically from `$XDG_RUNTIME_DIR/munder_difflin_demo.token` (typically `/run/user/<uid>/munder_difflin_demo.token`), falling back to `~/.cache/munder_difflin/munder_difflin_demo.token`. It streams pipeline stage progress and exits 0 on completion.
 
 ### Option C: Standalone Web Console (No ROS / Honest Fallback Mode)
 
@@ -246,29 +246,44 @@ cd ../desktop && npm start
 
 ## 6. Testing
 
-Run test suites using the project pytest configuration:
+### Test Suites Not Requiring ROS / Gazebo
+
+Run these from the repository root with `backend/.venv` active and `PYTHONPATH=backend`:
 
 ```bash
-# Backend unit & schema validation tests (no ROS required)
+source backend/.venv/bin/activate
+export PYTHONPATH=backend
+
+# Backend unit & schema validation tests (310 passed, 1 skipped)
 pytest tests/unit -c tests/pytest.ini
 
-# Static security and secret scanning
+# Static security and secret scanning (3 passed)
 pytest tests/static -c tests/pytest.ini
 
 # API integration tests (exercises live uvicorn subprocess)
 pytest tests/api -c tests/pytest.ini
 
-# Frontend unit and component tests
+# Frontend unit and component tests (38 passed across 7 test files)
 cd frontend && npm test && npm run typecheck && cd ..
+```
 
-# ROS 2 workspace unit tests (no simulation required)
-cd ros2_ws
+### Test Suites Requiring ROS 2 / Gazebo Simulation
+
+These suites require sourcing the built ROS 2 workspace and having a free simulation lock:
+
+```bash
+# Sourced ROS 2 environment:
 source /opt/ros/jazzy/setup.bash
-colcon test --packages-select munder_difflin_control
-colcon test-result --verbose
-cd ..
+source ros2_ws/install/setup.bash
 
-# ROS 2 headless smoke test (requires free simulation lock)
+# ROS 2 workspace unit tests (no simulation required, 10 passed)
+colcon test --base-paths ros2_ws/src/munder_difflin_control
+colcon test-result --verbose
+
+# ROS 2 simulation acceptance tests (requires Gazebo & MoveIt 2 running)
+pytest tests/ros -c tests/pytest.ini
+
+# Simulation headless smoke test (~58s wall time)
 bash ros2_ws/src/munder_difflin_bringup/scripts/smoke_test.sh --moveit
 ```
 
@@ -313,8 +328,8 @@ If no external API keys are configured and Ollama is unreachable, the **Determin
 ## 9. Troubleshooting Top 5
 
 1. **First-Move Path Tolerance Abort on Fresh Simulation:**  
-   *Symptom:* MoveIt aborts the first trajectory with `GOAL_TOLERANCE_VIOLATED` or `goal_time_tolerance exceeded`.  
-   *Fix:* Simulation joints require breakaway movement on cold start. `scripts/demo.sh` automatically primes the controller with an initial reset.
+   *Symptom:* On a fresh simulator start, the first task failed in 11 of 12 runs without a reset due to joint trajectory controller path tolerance violation (`GOAL_TOLERANCE_VIOLATED` or `goal_time_tolerance exceeded`).  
+   *Mitigation:* `RosExecutor` now automatically performs a reset once before the first task (resulting in 2 of 2 passes in later runs; root cause under active investigation by Andy). If the first command fails on a newly launched sim, simply retry the command.
 2. **Simulation Lock Held (`hive/sim.lock`):**  
    *Symptom:* `sim_lock.sh` exits with `sim.lock is held`.  
    *Fix:* To protect host memory and ROS domain ports, only one Gazebo simulation can run at a time. Wait for the active process to finish, or verify no orphan `gz sim` processes remain using `ps aux | grep "gz sim"`.
@@ -326,7 +341,7 @@ If no external API keys are configured and Ollama is unreachable, the **Determin
    *Fix:* Run `./scripts/demo.sh --software` to force software OpenGL rendering (`LIBGL_ALWAYS_SOFTWARE=1`).
 5. **Connection Refused / Unauthorized 401:**  
    *Symptom:* Dashboard shows "Connection refused" or requests fail with HTTP 401.  
-   *Fix:* Ensure `MD_API_TOKEN` matches between backend and frontend. In demo mode, copy the token output in `[4/4] ready` or read `~/.cache/munder_difflin/munder_difflin_demo.token`.
+   *Fix:* Ensure `MD_API_TOKEN` matches between backend and frontend. In demo mode, copy the token output in `[4/4] ready` or read `$XDG_RUNTIME_DIR/munder_difflin_demo.token` (fallback: `~/.cache/munder_difflin/munder_difflin_demo.token`).
 
 ---
 
@@ -334,7 +349,13 @@ If no external API keys are configured and Ollama is unreachable, the **Determin
 
 > [!NOTE]
 > **State as of October 28, 2026:**
-> - **Backend Core:** Verified. Unit and static tests pass (314 pass, 10 skip).
-> - **Frontend Console:** Verified. FlowView and ArmView3D components pass test suites (13/13 unit tests).
+> - **Backend Core:** Verified. Unit and static tests pass (310 passed, 1 skipped).
+> - **Frontend Console:** Verified. FlowView and ArmView3D components pass test suites (38 passed across 7 test files in `vitest`).
 > - **Simulation Smoke Test:** Verified. `smoke_test.sh --moveit` completes in ~58 seconds wall time with clean shutdown.
 > - **Live Multi-Run Acceptance Suite:** Under active verification by QA (Angela). Not yet signed off as an official production release.
+
+### Verification Reports (Evidence)
+For detailed test runs, outputs, and observed evidence, see:
+- [`docs/project/TEST_REPORT_ros_m1.md`](docs/project/TEST_REPORT_ros_m1.md): ROS M1 milestone simulation and MoveIt verification.
+- [`docs/project/TEST_REPORT_viz.md`](docs/project/TEST_REPORT_viz.md): Frontend FlowView, scene view, and replay verification.
+- [`docs/project/DEFECTS_ROS_002.md`](docs/project/DEFECTS_ROS_002.md): Live integration defect log and tracking.
