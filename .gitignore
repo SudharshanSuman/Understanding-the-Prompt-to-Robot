@@ -62,3 +62,6 @@ Thumbs.db
 ros2_ws/logs/
 ros2_ws/src/franka_ros2/
 ros2_ws/src/franka_description/
+
+# ros2_ws/pylib holds absolute symlinks into /usr/lib/python3/dist-packages (not portable); create them in a setup script
+ros2_ws/pylib/
