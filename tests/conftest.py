@@ -84,9 +84,11 @@ def ros_node():
     """L1: a throwaway rclpy node. Skipped with the ros marker when ROS is absent."""
     import rclpy
     rclpy.init()
-    node = rclpy.create_node("md_test_node")
+    node = None
     try:
+        node = rclpy.create_node("md_test_node")
         yield node
-    finally:
-        node.destroy_node()
+    finally:                      # also when create_node fails, so one broken test cannot poison the next init()
+        if node is not None:
+            node.destroy_node()
         rclpy.shutdown()

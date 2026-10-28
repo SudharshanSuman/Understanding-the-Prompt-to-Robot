@@ -13,7 +13,7 @@ from tests.api.helpers import free_port, start_server
 from tests.ui.cdp import Chrome, find_chrome
 
 API_PORT = 18765          # baked into the build's CSP connect-src (VITE_API_BASE)
-CONSOLE_PORT = 5173       # the origin in the backend's default allow-list
+CONSOLE_PORT = int(os.environ.get("MD_UI_CONSOLE_PORT", "5173"))  # default: the origin in the backend's default allow-list; other ports need MD_ALLOWED_ORIGINS on the backend
 CONSOLE = f"http://127.0.0.1:{CONSOLE_PORT}/"
 API = f"http://127.0.0.1:{API_PORT}"
 STATES = {"waiting", "running", "success", "warning", "failed", "cancelled", "needs_clarification"}
