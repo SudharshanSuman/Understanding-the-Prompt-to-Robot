@@ -1,129 +1,118 @@
 # Environment Report — Munder Difflin
 
-- **Task:** MD-REL-001 · **Author:** Stanley (REL) · **Audit run (UTC):** 2026-10-28T00:17:20Z (see raw output)
-- **Method:** `bash --noprofile --norc scripts/audit_env.sh` — read-only (version/query commands only; no install, no sudo, no writes). Exit code 0, empty stderr. Two consecutive runs gave identical results apart from RAM/disk numbers (idempotent).
-- **Scope note:** `hive/project-spec.md` (spec §2, §17, §21) does **not exist** on disk, so the checklist follows the task text plus `docs/architecture.md` / `docs/DECISIONS.md` (Franka Panda primary, UR5e fallback, Gazebo Harmonic, MoveIt 2, `ros2_control`, FastAPI, React/Tauri-or-Electron).
-- Everything marked PRESENT below was seen by the script. "Apt candidate" means `apt-cache policy` shows the package is available to install; it is **not** installed.
+- **Tasks:** MD-REL-001 (first audit), MD-REL-002 (post-install refresh) · **Author:** Stanley (REL) · **Audit run (UTC):** 2026-10-28T02:40:46Z (raw output in §5)
+- **Method:** `scripts/audit_env.sh` — read-only (version/query commands only; no install, no sudo, no writes). Exit code 0, empty stderr.
+- **Scope note:** `hive/project-spec.md` (spec §2, §17, §21) does **not** exist on disk, so the checklist follows the task text plus `docs/architecture.md` / `docs/DECISIONS.md` (Franka Panda primary, UR5e fallback, Gazebo Harmonic, MoveIt 2, `ros2_control`, FastAPI, React + Electron).
+- Everything marked PRESENT was seen by the script. "Apt candidate" means `apt-cache policy` shows the package can be installed; it is **not** installed.
+- **History:** the first audit (2026-10-28T00:17:20Z) was PARTIAL with the whole manipulation stack missing. The human then ran the apt install (option A of the original report). This file now shows the state after that install.
 
 ## 1. Verdict
 
-**PARTIAL — simulation base is ready; the manipulation stack is not installed.**
+**READY for the simulation + planning stack. Remaining gaps are optional or by decision.**
 
 | Area | Verdict |
 |---|---|
-| OS / ROS 2 Jazzy / Gazebo Harmonic / `ros_gz` | READY (Ubuntu 24.04.5, Jazzy desktop, `gz sim` 8.15.0, ros_gz 1.0.24) |
-| MoveIt 2, `ros2_control`, controllers, `gz_ros2_control` | **BLOCKER** — none installed; all have apt candidates for Jazzy (one apt command) |
-| Robot description (Panda / UR5e fallback) | **BLOCKER** — none installed; Panda and UR packages have apt candidates. Franka's own `franka_ros2` has **no** apt candidate (not needed if the `moveit_resources_panda` packages are used, per ADR-006) |
-| NVIDIA GPU | **WARNING** — RTX 3050 Mobile detected but no NVIDIA driver (kernel uses `nouveau`; `nvidia-smi` and `nvcc` missing). Gazebo can still run on the AMD iGPU/software rendering; GPU AI/vision workloads cannot. Driver install needs a reboot and is the human's call |
-| Python backend (FastAPI) | READY base (Python 3.12.3, pip, venv); `fastapi/uvicorn/websockets/pydantic` not installed — install in a venv, no sudo |
-| Frontend (Node) | READY (Node v20.20.2, npm 10.8.2) |
-| Desktop shell | Electron: ready (npm only). Tauri: **not ready** — no Rust, no WebKitGTK dev libs |
-| Docker | READY (29.9.2, Compose v5.1.2, user in `docker` group); no `nvidia-container-toolkit` |
-| Resources | **WARNING** — 39 GB free of 225 GB (83% used); 15.3 GB RAM with only ~5.7 GB available at audit time (machine under load) |
+| OS / ROS 2 Jazzy / Gazebo Harmonic / `ros_gz` | READY (Ubuntu 24.04.5, Jazzy desktop 0.11.0, `gz sim` 8.15.0, ros_gz 1.0.24) |
+| MoveIt 2, `ros2_control`, controllers, `gz_ros2_control` | READY — installed (MoveIt 2.12.4, ros2_control 4.48.1, ros2_controllers 4.42.1, gz_ros2_control 1.2.20). Was the BLOCKER in the first audit |
+| Robot description (Panda / UR5e fallback) | READY — `moveit_resources_panda_*` 3.1.0, `ur_description` 3.5.1, `ur_simulation_gz` 2.5.0, `ur_moveit_config`, `ur_controllers` installed |
+| Franka's own packages | Source checkout only, not built — `ros2_ws/src/franka_ros2` (tag v3.6.1) and `ros2_ws/src/franka_description` (tag 2.9.0) exist (Andy's work). No apt candidate exists. `colcon build` **not executed** (see RELEASE_CHECKLIST §4a) |
+| NVIDIA GPU | **WARNING (accepted)** — RTX 3050 Mobile, no driver (`nouveau` loaded; no `nvidia-smi`, no `nvcc`). Human decided to skip the driver install; local GPU inference is out of scope. Gazebo uses Mesa on the AMD iGPU or software rendering |
+| Python backend (FastAPI) | READY — `backend/.venv` (Python 3.12.3): fastapi 0.162.0, uvicorn 0.54.0, websockets 17.2, pydantic 2.14.1, starlette 1.10.0, pytest 9.1.1. Not on the system Python (ADR-005 isolation; the audit checks system Python so it still shows these as missing) |
+| Frontend (Node) | READY — Node v20.20.2, npm 10.8.2; `frontend/package-lock.json` and `desktop/package-lock.json` exist |
+| Desktop shell | **Electron (decided).** `desktop/` pins `electron` 44.9.3. Tauri / Rust are out of scope; the audit still prints their rows for information only |
+| Docker | READY (29.9.2, Compose v5.1.2, user in `docker` group); no `nvidia-container-toolkit` (not needed without a GPU) |
+| Resources | **WARNING** — 37 GB free of 225 GB (83% used); 15.3 GB RAM with ~5.7 GB available at audit time (machine under load) |
 
 ## 2. Present / missing / version table
 
-Condensed from the raw output in §5. Versions are exactly as the script printed them.
+Versions are exactly as the script printed them.
 
 | Component | Status | Version / detail |
 |---|---|---|
 | OS | PRESENT | Ubuntu 24.04.5 LTS, kernel 6.8.0-147-generic, x86_64 |
-| CPU / RAM | INFO | Ryzen 7 5800H, 16 threads / 15318 MiB (5661 MiB available at run), swap 2047 MiB |
-| Disk | INFO | 39G free of 225G (83% used) |
+| CPU / RAM | INFO | Ryzen 7 5800H, 16 threads / 15318 MiB (5656 MiB available at run), swap 2047 MiB |
+| Disk | INFO | 37G free of 225G (83% used) |
 | GPU hardware | INFO | NVIDIA GA107M RTX 3050 Mobile + AMD Cezanne (Vega) |
-| NVIDIA driver / `nvidia-smi` | **MISSING** | `nouveau` loaded; only `libnvidia-compute-580:i386` installed; `ubuntu-drivers` recommends `nvidia-driver-595-open` |
-| CUDA toolkit (`nvcc`) | **MISSING** | apt candidate `nvidia-cuda-toolkit` 12.0.140 (older than driver-side CUDA; only needed if building CUDA code) |
+| NVIDIA driver / `nvidia-smi`, `nvcc` | MISSING (by decision) | `nouveau` loaded; `ubuntu-drivers` recommends `nvidia-driver-595-open`; not installed (option E skipped) |
 | ROS 2 | PRESENT | Jazzy; `ros-jazzy-desktop` 0.11.0, `ros-jazzy-ros-base` 0.11.0 |
 | colcon / rosdep | PRESENT | colcon-common-extensions 0.3.0-100 / rosdep 0.27.0 |
-| rviz2, xacro, robot_state_publisher, tf2_ros, image_transport, cv_bridge | PRESENT | rviz2 14.1.24, xacro 2.1.1, rsp 3.3.4, tf2_ros 0.36.23, image_transport 5.1.8, cv_bridge 4.1.0 |
-| `rmw_cyclonedds_cpp` | MISSING | apt candidate 2.2.4 (optional; only if we pick Cyclone DDS) |
-| `joint_state_publisher_gui` | MISSING | apt candidate 2.4.3 (dev convenience) |
-| `rosbridge_server` | MISSING | apt candidate 2.7.1 (only if the UI talks rosbridge; architecture uses FastAPI + WebSocket) |
+| rviz2, xacro, robot_state_publisher, tf2_ros, image_transport, cv_bridge | PRESENT | 14.1.24, 2.1.1, 3.3.4, 0.36.23, 5.1.8, 4.1.0 |
+| `joint_state_publisher_gui` | PRESENT | 2.4.3 (was missing) |
+| `rmw_cyclonedds_cpp` | MISSING (optional) | apt candidate 2.2.4 |
+| `rosbridge_server` | MISSING (optional) | apt candidate 2.7.1; architecture uses FastAPI + WebSocket, not rosbridge. **Needed only if the backend talks to ROS through rosbridge** — Andy to confirm |
+| `nav2_bringup` | MISSING (optional) | apt candidate 1.3.13; not in the design |
 | Gazebo (`gz sim`) | PRESENT | 8.15.0 (Harmonic) at `/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz` |
 | `ros_gz_sim`, `_bridge`, `_interfaces`, `_image`, `ros_gz` | PRESENT | all 1.0.24 |
-| `gz_ros2_control` | **MISSING** | apt candidate 1.2.20 |
-| MoveIt 2 (`ros-jazzy-moveit` + `moveit_*` packages, `moveit_servo`, setup assistant) | **MISSING** | apt candidate 2.12.4 |
-| `moveit_visual_tools` | MISSING | apt candidate 4.2.0 (optional) |
-| `ros2_control`, `controller_manager`, `hardware_interface`, `ros2controlcli` | **MISSING** | apt candidate 4.48.1 |
-| `ros2_controllers` (`joint_state_broadcaster`, `joint_trajectory_controller`, `position/velocity/effort_controllers`, `gripper_controllers`, `forward_command_controller`, `diff_drive_controller`) | **MISSING** | apt candidate 4.42.1 |
-| Panda: `moveit_resources_panda_description` / `_moveit_config` | **MISSING** | apt candidates 3.1.0 |
-| UR5e fallback: `ur_description`, `ur_simulation_gz`, `ros-jazzy-ur` | **MISSING** | apt candidates 3.5.1 / 2.5.0 / 3.9.0 |
-| Franka (`franka_ros2`, `franka_description`) | MISSING | **no apt candidate** — would need a source build; not needed for the planned sim path |
-| Kinova | MISSING | Gen3 MoveIt configs have apt candidates (0.2.6); not in the chosen design |
+| `gz_ros2_control` | PRESENT | 1.2.20 (was missing) |
+| MoveIt 2 meta `ros-jazzy-moveit` | PRESENT | 2.12.4; `moveit_ros_move_group`, `_planning_interface`, `moveit_planners_ompl`, `moveit_kinematics`, `moveit_ros_visualization`, `moveit_setup_assistant`, `moveit_servo` all 2.12.4 |
+| `moveit_visual_tools` | MISSING (optional) | apt candidate 4.2.0 |
+| `ros2_control`, `controller_manager`, `hardware_interface`, `ros2controlcli`, `controller_manager_msgs` | PRESENT | 4.48.1 / 4.48.1 / 4.48.1 / 4.48.1 / 4.48.1 |
+| `ros2_controllers` and its controllers (`joint_state_broadcaster`, `joint_trajectory_controller`, `position_`, `velocity_`, `effort_`, `gripper_`, `forward_command_`, `diff_drive_`) | PRESENT | 4.42.1 |
+| Panda: `moveit_resources_panda_description` / `_moveit_config` | PRESENT | 3.1.0 |
+| UR5e fallback: `ur_description`, `ur_simulation_gz`, `ur_moveit_config`, `ur_controllers`, `ur_msgs`, `ur_dashboard_msgs` | PRESENT | `ur_description` 3.5.1, `ur_simulation_gz` 2.5.0 (others installed; versions not printed by the script) |
+| `ros-jazzy-ur` meta | MISSING (not needed) | apt candidate 3.9.0 — the individual UR packages are installed |
+| Franka (`franka_ros2`, `franka_description`) | SOURCE ONLY | not apt; checkouts in `ros2_ws/src` (3.6.1 / 2.9.0), unbuilt. Not seen by `ros2 pkg list` until built |
+| Kinova | MISSING | not in the chosen design |
 | Existing ROS workspaces | INFO | `~/apriltag_ws ~/colcon_ws ~/ros2_ws ~/turtlebot3_ws` exist (not inspected or touched) |
-| Python | PRESENT | 3.12.3, pip 24.0, venv OK; numpy 1.26.4, scipy 1.11.4, cv2 4.6.0, PyYAML 6.0.1 |
-| fastapi, uvicorn, websockets, pydantic, torch, onnxruntime, `uv` | MISSING | install per project in a venv |
+| Python (system) | PRESENT | 3.12.3, pip 24.0, venv OK; numpy 1.26.4, scipy 1.11.4, cv2 4.6.0, PyYAML 6.0.1 |
+| fastapi, uvicorn, websockets, pydantic | MISSING in system Python | by design — they live in `backend/.venv` (versions above) |
+| torch, onnxruntime, `uv` | MISSING | not required |
 | Node / npm | PRESENT | v20.20.2 / 10.8.2 |
 | pnpm, yarn | MISSING | optional |
-| Rust (`rustc`, `cargo`), Tauri CLI | **MISSING** | apt has rustc/cargo 1.75.0; Tauri 2 normally needs a newer Rust (not verified here) |
-| Tauri build deps | MISSING (5) | `libwebkit2gtk-4.1-dev`, `librsvg2-dev`, `libayatana-appindicator3-dev`, `libsoup-3.0-dev`, `libjavascriptcoregtk-4.1-dev` all have apt candidates. Present: `libgtk-3-dev`, `libssl-dev`, `build-essential`, `pkg-config` |
-| Electron | MISSING (global) | normal — it is a per-project npm dependency. Runtime libs present (`libnss3`, `libxss1`, `libasound2t64`, `libgbm1`) |
+| Rust (`rustc`, `cargo`), Tauri CLI, WebKitGTK dev libs | MISSING (by decision) | Electron chosen; none needed |
+| Electron | per-project | `desktop/package.json` pins 44.9.3; runtime libs present (`libnss3`, `libxss1`, `libasound2t64`, `libgbm1`, `libgtk-3-0t64`) |
 | git, cmake, gcc/g++, make, ninja, curl, ffmpeg | PRESENT | git 2.43.0, cmake 3.28.3, gcc 13.3.0, make 4.3, ninja 1.11.1, curl 8.5.0, ffmpeg 6.1.1 |
-| `gh` (GitHub CLI) | MISSING | apt candidate 2.45.0 (needed for the PR workflow) |
-| Docker / Compose | PRESENT | 29.9.2 / v5.1.2, daemon reachable, user in `docker` group |
-| `nvidia-container-toolkit`, podman | MISSING | no apt candidate for the toolkit in the current sources; only needed for GPU containers |
-| Ports | INFO | 8000 free (backend), 9090 free (rosbridge), 5173/3000/11311/7400 free; **8080 in use** (owner not visible) |
+| `gh` (GitHub CLI) | MISSING | apt candidate 2.45.0 (option B, not requested yet; needed for PRs) |
+| Docker / Compose | PRESENT | 29.9.2 / v5.1.2 |
+| `nvidia-container-toolkit`, podman | MISSING | not needed |
+| Ports | INFO | 8000 free (backend), 9090 free, 5173/3000/11311/7400 free; **8080 in use** (owner not visible) |
 
-## 3. Risks and notes for Andy / Oscar / Jim
+## 3. Risks and notes
 
-1. **The headless run had no display** (`DISPLAY` unset in the audit shell). Gazebo GUI, rviz2 and MoveIt visual tests need a desktop session — not verified here.
-2. **GPU**: with `nouveau` only, Gazebo rendering uses Mesa on whichever GPU the system picks. Installing the NVIDIA driver changes the graphics stack on a hybrid laptop and needs a reboot — recommend the human does this deliberately, not as part of a bulk install.
-3. **Disk is 83% used.** MoveIt + ros2_control + Panda/UR packages are expected to be on the order of 1–2 GB (estimate, not measured). Docker images and any simulator add more.
-4. **Existing installs untouched.** Several ROS workspaces already live in `$HOME`; installing apt packages system-wide does not modify them, but a later `colcon build` against a different overlay could mask them. Keep this project's workspace separate.
-5. **Git root**: `munder_difflin/` sits inside the home-directory git repository. Do not `git add` from here until the project has its own repo.
-6. **Port 8080** is taken; the backend design uses 8000, which is free.
-7. **Tauri vs Electron** is still open in `architecture.md`. Electron works today with npm only; Tauri needs ~6 apt packages plus a Rust toolchain (the usual rustup installer is a `curl | sh` pattern that Security finding SEC-008 forbids, so it needs a checksum-verified route).
+1. **Not yet proven to work together.** The audit shows packages installed; it does not run them. No launch, no `colcon build`, no Gazebo run has been executed by REL. Checklist §4a lists the steps and expected evidence.
+2. **No display in the audit shell** (`DISPLAY` unset). Gazebo GUI, rviz2 and MoveIt visual tests need a desktop session, or `gz sim -s` / `--headless-rendering` for server-only runs. Not verified here.
+3. **GPU**: `nouveau` only; Gazebo rendering falls to Mesa. Accepted by the human; revisit only if rendering is too slow.
+4. **Disk is 83% used (37 GB free).** The ROS install consumed space; Docker images and a Franka build add more. Keep an eye on it before any `colcon build` (build and install dirs are git-ignored).
+5. **Overlay masking.** Four other ROS workspaces live in `$HOME`. Source this project's overlay in a clean shell (`env -i` or a fresh terminal without `~/ros2_ws` sourced) so they do not shadow it.
+6. **Nested git repositories.** `ros2_ws/src/franka_ros2` and `ros2_ws/src/franka_description` each contain their own `.git`. A plain `git add ros2_ws` would record them as embedded repos, not as source. They are **untracked and not committed**. Andy and the Boss need to choose one of: a `.repos` file for `vcs import`, git submodules, or ignoring them and documenting the tags. REL recommends the `.repos` file (pinned tags v3.6.1 / 2.9.0, no nested `.git` committed).
+7. **Port 8080** is taken; the backend uses 8000, which is free.
 
-## 4. Install commands needed (for the human to authorise — NOT run by this audit)
+## 4. Install commands still open (for the human; NOT run by REL)
 
 ```bash
-# A. Required for the simulation + planning stack (system, needs sudo)
-sudo apt update
-sudo apt install -y \
-  ros-jazzy-moveit ros-jazzy-ros2-control ros-jazzy-ros2-controllers \
-  ros-jazzy-gz-ros2-control \
-  ros-jazzy-moveit-resources-panda-description ros-jazzy-moveit-resources-panda-moveit-config \
-  ros-jazzy-ur-description ros-jazzy-ur-simulation-gz \
-  ros-jazzy-joint-state-publisher-gui
+# Done by the human since the first audit: option A (MoveIt, ros2_control, controllers, gz_ros2_control, Panda + UR packages, joint_state_publisher_gui).
 
-# B. Developer tooling
+# B. Developer tooling (not requested yet) — needed for `gh pr create`
 sudo apt install -y gh
 
-# C. Optional — only if the team chooses these
+# C. Optional — only if Andy confirms a need
 sudo apt install -y ros-jazzy-rosbridge-server ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-moveit-visual-tools
 
-# D. Only if Tauri (not Electron) is chosen
-sudo apt install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev \
-  libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
-#    Rust toolchain: apt provides 1.75.0; a newer one needs a checksum-verified download (see SEC-008).
+# D (Tauri) and E (NVIDIA driver): skipped by decision.
 
-# E. GPU (human decision; reboot required) — driver recommended by ubuntu-drivers
-sudo apt install -y nvidia-driver-595-open && sudo reboot
-#    (candidate version for this package was not queried; CUDA toolkit not needed unless building CUDA code)
-
-# F. Backend (no sudo, per-project venv; keep it separate from ROS system packages per ADR-005)
-python3 -m venv backend/.venv && backend/.venv/bin/pip install fastapi uvicorn websockets pydantic
+# F. Backend — already done in backend/.venv; to recreate from the hash-pinned lock (no sudo):
+python3 -m venv backend/.venv && backend/.venv/bin/pip install --require-hashes -r backend/requirements-dev.lock
 ```
 
-After A, re-run `bash --noprofile --norc scripts/audit_env.sh` and replace §5 with the new output.
+Re-run after any install: `env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin bash --noprofile --norc scripts/audit_env.sh` and replace §5.
 
 ## 5. Raw output of `scripts/audit_env.sh`
 
-Captured with `env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin XDG_SESSION_TYPE=x11 bash --noprofile --norc scripts/audit_env.sh`:
+Captured with `env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin bash --noprofile --norc scripts/audit_env.sh` (exit 0, stderr empty):
 
 ```text
 Munder Difflin environment audit
-Date (UTC): 2026-10-28T00:17:20Z   Host: Zoro   User: sudharshan
+Date (UTC): 2026-10-28T02:40:46Z   Host: Zoro   User: sudharshan
 
 == OS / hardware ==
 system         OS                                 INFO     Ubuntu 24.04.5 LTS
 system         Kernel / arch                      INFO     6.8.0-147-generic / x86_64
 system         CPU                                INFO     AMD Ryzen 7 5800H with Radeon Graphics (16 threads)
-system         RAM (total / available)            INFO     15318 MiB / 5661 MiB
+system         RAM (total / available)            INFO     15318 MiB / 5656 MiB
 system         Swap                               INFO     2047 MiB
-system         Disk /                             INFO     39G free of 225G (83% used)
-system         Disk $HOME                         INFO     39G free of 225G (83% used)
-system         Session type (env of caller)       INFO     x11 / DISPLAY=unset / WAYLAND=unset
+system         Disk /                             INFO     37G free of 225G (83% used)
+system         Disk $HOME                         INFO     37G free of 225G (83% used)
+system         Session type (env of caller)       INFO     unknown / DISPLAY=unset / WAYLAND=unset
 
 == GPU / CUDA ==
 gpu            PCI device                         INFO     NVIDIA Corporation GA107M [GeForce RTX 3050 Mobile] (rev a1)
@@ -148,7 +137,7 @@ ros            rmw_cyclonedds_cpp                 MISSING  ros-jazzy-rmw-cyclone
 ros            rviz2                              PRESENT  deb 14.1.24-1noble.20260915.204213; /opt/ros/jazzy
 ros            xacro                              PRESENT  deb 2.1.1-1noble.20260519.011123; /opt/ros/jazzy
 ros            robot_state_publisher              PRESENT  deb 3.3.4-1noble.20260915.184559; /opt/ros/jazzy
-ros            joint_state_publisher_gui          MISSING  joint_state_publisher_gui (not found by ros2 pkg prefix; apt candidate 2.4.3-1noble.20260912.164400)
+ros            joint_state_publisher_gui          PRESENT  deb 2.4.3-1noble.20260912.164400; /opt/ros/jazzy
 ros            tf2_ros                            PRESENT  deb 0.36.23-1noble.20260915.173839; /opt/ros/jazzy
 ros            rosbridge_server                   MISSING  rosbridge_server (not found by ros2 pkg prefix; apt candidate 2.7.1-1noble.20261006.035306)
 ros            image_transport                    PRESENT  deb 5.1.8-1noble.20260912.165731; /opt/ros/jazzy
@@ -164,45 +153,45 @@ gazebo         ros_gz_interfaces                  PRESENT  ros-jazzy-ros-gz-inte
 gazebo         ros_gz_image                       PRESENT  ros-jazzy-ros-gz-image 1.0.24-1noble.20260921.023911
 gazebo         ros_gz (meta)                      PRESENT  ros-jazzy-ros-gz 1.0.24-1noble.20261006.041805
 gazebo         ros_gz_sim (resolvable)            PRESENT  deb 1.0.24-1noble.20261006.035056; /opt/ros/jazzy
-gazebo         gz_ros2_control                    MISSING  ros-jazzy-gz-ros2-control (apt candidate 1.2.20-1noble.20261006.040504)
-gazebo         gz_ros2_control (resolvable)       MISSING  gz_ros2_control (not found by ros2 pkg prefix; apt candidate 1.2.20-1noble.20261006.040504)
+gazebo         gz_ros2_control                    PRESENT  ros-jazzy-gz-ros2-control 1.2.20-1noble.20261006.040504
+gazebo         gz_ros2_control (resolvable)       PRESENT  deb 1.2.20-1noble.20261006.040504; /opt/ros/jazzy
 
 == MoveIt 2 / ros2_control / controllers ==
-moveit         moveit (meta)                      MISSING  ros-jazzy-moveit (apt candidate 2.12.4-1noble.20260921.025955)
-moveit         moveit_ros_move_group              MISSING  moveit_ros_move_group (not found by ros2 pkg prefix; apt candidate 2.12.4-1noble.20260915.202214)
-moveit         moveit_ros_planning_interface      MISSING  moveit_ros_planning_interface (not found by ros2 pkg prefix; apt candidate 2.12.4-1noble.20260915.203504)
-moveit         moveit_planners_ompl               MISSING  moveit_planners_ompl (not found by ros2 pkg prefix; apt candidate 2.12.4-1noble.20260915.201618)
-moveit         moveit_kinematics                  MISSING  moveit_kinematics (not found by ros2 pkg prefix; apt candidate 2.12.4-1noble.20260915.201542)
-moveit         moveit_ros_visualization           MISSING  moveit_ros_visualization (not found by ros2 pkg prefix; apt candidate 2.12.4-1noble.20260915.204804)
-moveit         moveit_setup_assistant             MISSING  moveit_setup_assistant (not found by ros2 pkg prefix; apt candidate 2.12.4-1noble.20260921.023050)
-moveit         moveit_servo                       MISSING  moveit_servo (not found by ros2 pkg prefix; apt candidate 2.12.4-1noble.20261006.040508)
+moveit         moveit (meta)                      PRESENT  ros-jazzy-moveit 2.12.4-1noble.20260921.025955
+moveit         moveit_ros_move_group              PRESENT  deb 2.12.4-1noble.20260915.202214; /opt/ros/jazzy
+moveit         moveit_ros_planning_interface      PRESENT  deb 2.12.4-1noble.20260915.203504; /opt/ros/jazzy
+moveit         moveit_planners_ompl               PRESENT  deb 2.12.4-1noble.20260915.201618; /opt/ros/jazzy
+moveit         moveit_kinematics                  PRESENT  deb 2.12.4-1noble.20260915.201542; /opt/ros/jazzy
+moveit         moveit_ros_visualization           PRESENT  deb 2.12.4-1noble.20260915.204804; /opt/ros/jazzy
+moveit         moveit_setup_assistant             PRESENT  deb 2.12.4-1noble.20260921.023050; /opt/ros/jazzy
+moveit         moveit_servo                       PRESENT  deb 2.12.4-1noble.20261006.040508; /opt/ros/jazzy
 moveit         moveit_visual_tools                MISSING  moveit_visual_tools (optional) (not found by ros2 pkg prefix; apt candidate 4.2.0-1noble.20260921.022155)
-control        ros2_control                       MISSING  ros2_control (not found by ros2 pkg prefix; apt candidate 4.48.1-1noble.20261006.040510)
-control        controller_manager                 MISSING  controller_manager (not found by ros2 pkg prefix; apt candidate 4.48.1-1noble.20261006.035021)
-control        hardware_interface                 MISSING  hardware_interface (not found by ros2 pkg prefix; apt candidate 4.48.1-1noble.20260924.184843)
-control        ros2_controllers                   MISSING  ros2_controllers (not found by ros2 pkg prefix; apt candidate 4.42.1-1noble.20260924.191822)
-control        joint_state_broadcaster            MISSING  joint_state_broadcaster (not found by ros2 pkg prefix; apt candidate 4.42.1-1noble.20260924.190601)
-control        joint_trajectory_controller        MISSING  joint_trajectory_controller (not found by ros2 pkg prefix; apt candidate 4.42.1-1noble.20260924.190511)
-control        position_controllers               MISSING  position_controllers (not found by ros2 pkg prefix; apt candidate 4.42.1-1noble.20260924.191112)
-control        velocity_controllers               MISSING  velocity_controllers (not found by ros2 pkg prefix; apt candidate 4.42.1-1noble.20260924.191108)
-control        effort_controllers                 MISSING  effort_controllers (not found by ros2 pkg prefix; apt candidate 4.42.1-1noble.20260924.191111)
-control        gripper_controllers                MISSING  gripper_controllers (not found by ros2 pkg prefix; apt candidate 4.42.1-1noble.20260924.190425)
-control        forward_command_controller         MISSING  forward_command_controller (not found by ros2 pkg prefix; apt candidate 4.42.1-1noble.20260924.190606)
-control        diff_drive_controller              MISSING  diff_drive_controller (not found by ros2 pkg prefix; apt candidate 4.42.1-1noble.20260924.190414)
-control        ros2controlcli                     MISSING  ros2controlcli (not found by ros2 pkg prefix; apt candidate 4.48.1-1noble.20261006.035651)
-control        controller_manager_msgs            MISSING  controller_manager_msgs (not found by ros2 pkg prefix; apt candidate 4.48.1-1noble.20260911.100117)
+control        ros2_control                       PRESENT  deb 4.48.1-1noble.20261006.040510; /opt/ros/jazzy
+control        controller_manager                 PRESENT  deb 4.48.1-1noble.20261006.035021; /opt/ros/jazzy
+control        hardware_interface                 PRESENT  deb 4.48.1-1noble.20260924.184843; /opt/ros/jazzy
+control        ros2_controllers                   PRESENT  deb 4.42.1-1noble.20260924.191822; /opt/ros/jazzy
+control        joint_state_broadcaster            PRESENT  deb 4.42.1-1noble.20260924.190601; /opt/ros/jazzy
+control        joint_trajectory_controller        PRESENT  deb 4.42.1-1noble.20260924.190511; /opt/ros/jazzy
+control        position_controllers               PRESENT  deb 4.42.1-1noble.20260924.191112; /opt/ros/jazzy
+control        velocity_controllers               PRESENT  deb 4.42.1-1noble.20260924.191108; /opt/ros/jazzy
+control        effort_controllers                 PRESENT  deb 4.42.1-1noble.20260924.191111; /opt/ros/jazzy
+control        gripper_controllers                PRESENT  deb 4.42.1-1noble.20260924.190425; /opt/ros/jazzy
+control        forward_command_controller         PRESENT  deb 4.42.1-1noble.20260924.190606; /opt/ros/jazzy
+control        diff_drive_controller              PRESENT  deb 4.42.1-1noble.20260924.190414; /opt/ros/jazzy
+control        ros2controlcli                     PRESENT  deb 4.48.1-1noble.20261006.035651; /opt/ros/jazzy
+control        controller_manager_msgs            PRESENT  deb 4.48.1-1noble.20260911.100117; /opt/ros/jazzy
 
 == Existing robot packages ==
-robots         robot packages in ros2 pkg list    MISSING  no franka/ur/kinova/xarm/etc. found
+robots         robot packages in ros2 pkg list    PRESENT  moveit_resources_panda_description moveit_resources_panda_moveit_config ur_controllers ur_dashboard_msgs ur_description ur_moveit_config ur_msgs ur_simulation_gz 
 robots         apt ros-jazzy-franka*              MISSING  none installed
-robots         apt ros-jazzy-ur-*                 MISSING  none installed
+robots         apt ros-jazzy-ur-*                 PRESENT  ros-jazzy-ur-controllers ros-jazzy-ur-dashboard-msgs ros-jazzy-ur-description ros-jazzy-ur-moveit-config ros-jazzy-ur-msgs 
 robots         apt ros-jazzy-kinova*              MISSING  none installed
 robots         apt ros-jazzy-xarm*                MISSING  none installed
-robots         apt ros-jazzy-moveit-resources-panda-moveit-config* MISSING  none installed
+robots         apt ros-jazzy-moveit-resources-panda-moveit-config* PRESENT  ros-jazzy-moveit-resources-panda-moveit-config 
 robots         apt ros-jazzy-ur (meta)            MISSING  apt candidate 3.9.0-1noble.20261006.044441
-robots         apt ros-jazzy-moveit-resources-panda-description MISSING  apt candidate 3.1.0-1noble.20260225.235702
-robots         apt ros-jazzy-ur-simulation-gz     MISSING  apt candidate 2.5.0-1noble.20261006.043651
-robots         apt ros-jazzy-ur-description       MISSING  apt candidate 3.5.1-1noble.20260920.234208
+robots         apt ros-jazzy-moveit-resources-panda-description PRESENT  3.1.0-1noble.20260225.235702
+robots         apt ros-jazzy-ur-simulation-gz     PRESENT  2.5.0-1noble.20261006.043651
+robots         apt ros-jazzy-ur-description       PRESENT  3.5.1-1noble.20260920.234208
 robots         apt Franka packages                INFO     franka_ros2/franka_description: no apt candidate (source build needed if none)
 robots         apt Kinova Gen3 moveit config      INFO     apt candidate 0.2.6-1noble.20261006.043712
 robots         colcon workspaces in $HOME         INFO     /home/sudharshan/apriltag_ws /home/sudharshan/colcon_ws /home/sudharshan/ros2_ws /home/sudharshan/turtlebot3_ws 

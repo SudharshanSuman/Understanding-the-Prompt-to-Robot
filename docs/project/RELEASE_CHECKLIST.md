@@ -12,8 +12,9 @@ _Owner: Stanley (REL) · Status: skeleton, v0. Items are unchecked until someone
 - [ ] Working in the project's own git repo — **not** the home-directory repo
 
 ## 1. Environment (see `docs/environment_report.md`)
-- [ ] `scripts/audit_env.sh` re-run on the release machine; no BLOCKER rows
-- [ ] `DEPENDENCY_MATRIX.md` pins match what the audit shows
+- [x] Post-install audit run 2026-10-28T02:40:46Z after the human's apt install: exit 0, empty stderr. No BLOCKER rows; MoveIt 2.12.4, ros2_control 4.48.1, ros2_controllers 4.42.1, gz_ros2_control 1.2.20, Panda and UR packages all PRESENT (`docs/environment_report.md` §5). **Re-run on the release machine before each release.**
+- [x] `DEPENDENCY_MATRIX.md` "Installed" column refreshed from that audit. The **Pin** column is still TBD for the ROS packages (owner: Robotics) — pins are not decided, so this item is only half closed: installed versions are recorded, pins are not.
+- [ ] Optional gaps open by decision: `gh` (needed for the PR step in §6), `shellcheck` (needed for §3), `rosbridge_server` (only if Andy's design uses it)
 
 ## 2. Secrets and repo hygiene (SEC-004 — CRITICAL) — status as of 2026-10-28, REL
 
@@ -42,16 +43,59 @@ Scope today: `scripts/audit_env.sh` is the only script in the repo.
 
 ## 4. Build and dependencies (SEC-014 — MEDIUM)
 
-Desktop shell decision: **Electron** (no Rust / WebKitGTK installs). No `package.json` exists yet, so the Node items cannot be executed.
+Desktop shell decision: **Electron** (no Rust / WebKitGTK installs). `frontend/package.json` and `desktop/package.json` now exist (Electron 44.9.3); the checks below are still **not executed** by REL.
 
-- [ ] `package-lock.json` committed — no frontend yet; **not executed**
+- [ ] `package-lock.json` committed — `frontend/package-lock.json` is tracked since `df9570e`; `desktop/` (and its `package-lock.json`) is **untracked** at 2026-10-28 and has not been committed or reviewed by REL
 - [ ] CI runs `npm audit --audit-level=high` (fail on high/critical) — no CI exists; **not executed**. Local equivalent to run before release: `npm audit --audit-level=high`
 - [ ] Python dependency audit — `backend/requirements.txt` exists; tool (`pip-audit`) not installed; **not executed**
 - [ ] Production frontend build has no source maps — `*.map` is git-ignored; build config must set `sourcemap: false` for production; **not executed** (check `find dist -name '*.map'` is empty)
 - [ ] Electron settings (SEC-015): `nodeIntegration: false`, `contextIsolation: true`, `webSecurity: true`, preload via `contextBridge`, CSP limited to `http://localhost:8000` and `ws://localhost:8000` — review when `main.js` exists; **not executed**
 - [x] Python lockfiles, hash-pinned (SEC-004-D1): `backend/requirements.lock` (production, 18 packages) and `backend/requirements-dev.lock` (adds pytest etc., 23 packages), built from `backend/.venv` versions with sha256 of the PyPI wheels (linux x86_64, CPython 3.12). Verified in a throwaway venv outside the repo: `pip install --require-hashes --no-deps --no-index --find-links <downloaded wheels> -r requirements-dev.lock` succeeded and `pip check` reported no broken requirements; a deliberately corrupted hash was rejected (exit 1, nothing installed). Nothing was installed system-wide. Regenerate when `requirements*.txt` changes or on another platform. ROS dependencies via `rosdep`: TBD
 - [ ] Clean build from a fresh clone: command ____ · result ____
-- [ ] `colcon build` of `ros2_ws/` clean — `ros2_ws/src` is empty today: ____
+- [ ] `colcon build` of `ros2_ws/` clean — see §4a (nothing executed yet)
+
+## 4a. ROS workspace build and launch verification (for when Andy delivers `ros2_ws/`)
+
+Status 2026-10-28: **none of these steps has been executed.** At this date `ros2_ws/src` holds only the two third-party Franka checkouts (`franka_ros2` tag v3.6.1, `franka_description` tag 2.9.0), untracked, each with its own `.git`. No project-owned package, launch file or controller config has been delivered. Run every step in a clean shell (`env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin bash --noprofile --norc`) so `~/ros2_ws`, `~/colcon_ws` and the other workspaces cannot shadow this one. No `sudo`; a missing system package is reported to the Boss for the human to install. Record the command, exit code and the real output tail for each step; mark anything skipped "not executed".
+
+**Pre-conditions**
+- [ ] Source layout decided and committed: third-party code comes in through a pinned manifest (`ros2_ws/*.repos` with tags) or submodules — **not** as nested `.git` directories (see `environment_report.md` §3 item 6). Evidence: `git ls-files ros2_ws | head`; `find ros2_ws/src -name .git -maxdepth 3` prints nothing for committed content.
+- [ ] `libfranka` question answered: `dpkg -l | grep -i libfranka` showed no package on 2026-10-28 and the audit does not check it. If `franka_hardware` needs it, state whether it is built from source (checksum/tag pinned), skipped for simulation, or replaced by the Panda/UR packages from apt (ADR-006).
+- [ ] `rosdep` keys resolve: `source /opt/ros/jazzy/setup.bash && rosdep install --from-paths ros2_ws/src --ignore-src --simulate` lists only already-installed or apt-available packages (`--simulate` prints, does not install). Any "cannot locate rosdep definition" is a blocker for Andy.
+
+**Build**
+- [ ] `cd ros2_ws && colcon build --symlink-install --event-handlers console_cohesion+` ends with `Summary: N packages finished`, **0 failed**, exit 0. Evidence: console tail plus `ros2_ws/log/latest_build/` (git-ignored; do not commit).
+- [ ] Warnings reviewed: stderr of build packages listed; no new warning category without an owner's note.
+- [ ] Build is repeatable from a fresh clone: `git clone` the repo to a scratch directory, repeat the two steps above, same result.
+- [ ] `build/`, `install/`, `log/` are untracked afterwards: `git status --short ros2_ws` shows only intended source files.
+
+**Unit tests**
+- [ ] `colcon test --event-handlers console_direct+` then `colcon test-result --verbose`: 0 errors, 0 failures, skipped tests listed.
+
+**Overlay**
+- [ ] `source ros2_ws/install/setup.bash` in the clean shell; `ros2 pkg list | grep -E 'franka|panda|ur_|<project packages>'` shows the workspace packages; `ros2 pkg prefix <package>` points into `ros2_ws/install` for project-owned packages and into `/opt/ros/jazzy` for apt ones.
+
+**Launch (simulation, Panda primary)**
+- [ ] Display available, or headless: a desktop session (`DISPLAY` set) for the Gazebo GUI and rviz2, otherwise run the server only (`gz sim -s -r`, or the launch file's headless argument). State which was used.
+- [ ] Launch command (Andy to supply — launch file name TBD): `ros2 launch <package> <launch file>` starts without a traceback; the first 60 s of output contain no `[ERROR]`/`[FATAL]` lines (list any that appear).
+- [ ] Nodes up: `ros2 node list` includes `controller_manager`, `robot_state_publisher`, `move_group`, and the Gazebo bridge.
+- [ ] Controllers active: `ros2 control list_controllers` shows `joint_state_broadcaster` **active**, the arm `joint_trajectory_controller` **active**, and the gripper controller **active** (if any). Paste the table.
+- [ ] State flowing: `ros2 topic echo /joint_states --once` returns a message with the arm's joint names; `ros2 topic hz /joint_states` shows a steady rate (record the number).
+- [ ] MoveIt reachable: `ros2 action list` includes the `MoveGroup` action (`/move_action`); `ros2 service call /get_planning_scene ...` or the project's smoke script returns a planning scene.
+- [ ] Plan-and-execute smoke: one small joint-space goal plans and executes, final `/joint_states` is within tolerance of the goal. Command, goal and measured error recorded.
+- [ ] Safety/validation: an out-of-range or colliding goal is **rejected** and the arm does not move (ties to §5 safety tests).
+- [ ] Clean shutdown: Ctrl-C ends all processes; `pgrep -a -f 'gz sim|ruby|move_group|ros2_control_node'` prints nothing afterwards; no zombie Gazebo server holding port/transport.
+- [ ] Time budget recorded: seconds from launch to "controllers active", and peak RAM (`free -m`) — the machine has 15 GB and showed ~5.7 GB available under load.
+
+**Fallback arm (UR5e, ADR-006)**
+- [ ] `ros2 launch ur_simulation_gz ur_sim_control.launch.py ur_type:=ur5e` (installed launch files, listed 2026-10-28: `ur_sim_control.launch.py`, `ur_sim_moveit.launch.py`) brings up controllers; repeat the "controllers active" and "state flowing" checks. Not executed.
+- [ ] Panda reference config launches: `ros2 launch moveit_resources_panda_moveit_config demo.launch.py` (installed; needs a display) — baseline that MoveIt itself works independent of Andy's code. Not executed.
+
+**Backend integration**
+- [ ] The FastAPI backend reaches ROS through the interface in `docs/INTERFACE_CONTRACTS.md` (path TBD by Andy/Oscar): one natural-language command from the API to a completed motion in simulation, with request id, log lines and final joint state. Run only after QA signs off the backend suite (§5).
+- [ ] Backend and ROS use separate Python environments (ADR-005): `backend/.venv` is not on the ROS `PYTHONPATH` and vice versa. Evidence: `echo $PYTHONPATH` in each shell.
+
+**Sign-off for this block:** Tester GO path ____ · REL commit ____ (nothing is DONE until the Tester has verified it).
 
 ## 5. Tests (run by QA, not by the author)
 - [ ] Backend unit tests: ____
