@@ -1,0 +1,17 @@
+{
+  "name": "munder-difflin-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron wrapper around the Munder Difflin console (same frontend build, local backend).",
+  "main": "index.cjs",
+  "scripts": {
+    "build:frontend": "npm --prefix ../frontend run build",
+    "start": "electron .",
+    "test": "node --test test/unit.test.cjs",
+    "smoke": "electron test/smoke.cjs",
+    "smoke:unsandboxed": "electron --no-sandbox test/smoke.cjs"
+  },
+  "devDependencies": {
+    "electron": "44.9.3"
+  }
+}
