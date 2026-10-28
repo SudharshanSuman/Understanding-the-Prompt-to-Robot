@@ -12,10 +12,8 @@ PATTERNS = {
     "aws access key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     "private key block": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
 }
-# A match that spells out that it is a placeholder is a deliberate fixture/doc example (e.g. nvapi-SECRET..., AKIA...EXAMPLE),
-# not a credential. Real keys are random, so these words do not occur in them in practice. Everything else still fails.
-PLACEHOLDER_WORDS = ("fake", "example", "secret", "dummy", "placeholder", "notreal", "leakcheck", "apileak")
-SKIP_DIRS = {".venv", "node_modules", ".git", "__pycache__", "build", "install", "log", "reports"}
+# .claude/ holds third-party, reviewed skill docs (git-ignored); they contain AWS-key-shaped EXAMPLE text.
+SKIP_DIRS = {".claude", ".venv", "node_modules", ".git", "__pycache__", "build", "install", "log", "reports"}
 SKIP_SUFFIX = {".png", ".jpg", ".stl", ".dae", ".pyc", ".so", ".zip"}
 
 
@@ -35,16 +33,26 @@ def test_no_secrets_in_repo(repo_root):
         except OSError:
             continue
         for label, rx in PATTERNS.items():
-            real = [m for m in rx.finditer(text) if not any(w in m.group(0).lower() for w in PLACEHOLDER_WORDS)]
+            real = list(rx.finditer(text))
             if real:
                 hits.append(f"{p.relative_to(repo_root)}: {label}")  # never print the match itself
     assert not hits, "possible secrets:\n" + "\n".join(hits)
 
 
-def test_the_scan_still_catches_a_realistic_key_and_ignores_labelled_placeholders():
+def test_the_scan_flags_realistic_keys_even_when_labelled_as_examples():
+    """No exemption for 'fake'/'example' wording: a real key could be labelled that way (god's decision, MD-TEST-005)."""
     real = "sk-" + "ant-" + "Zq8" * 12
     assert any(rx.search(real) for rx in PATTERNS.values())
-    flagged = [m for rx in PATTERNS.values() for m in rx.finditer(real) if not any(w in m.group(0).lower() for w in PLACEHOLDER_WORDS)]
-    assert flagged, "a realistic key must not be waved through by the placeholder rule"
-    fake = "nvapi-" + "SECRET" + "0123456789abcdefghijkl"
-    assert not [m for rx in PATTERNS.values() for m in rx.finditer(fake) if not any(w in m.group(0).lower() for w in PLACEHOLDER_WORDS)]
+    for labelled in (
+        "# example: " + real,
+        "sk-" + "example-" + "Zq8" * 12,
+        "nvapi-" + "EXAMPLE" + "0123456789abcdefghijkl",
+        "AKIA" + "IOSFODNN7" + "EXAMPLE",
+    ):
+        assert any(rx.search(labelled) for rx in PATTERNS.values()), "a key-shaped string with 'example' next to it must still be flagged"
+
+
+def test_backend_requirements_include_a_websocket_implementation(repo_root):
+    """Found by Pam on real uvicorn: without `websockets` (or wsproto) every /ws route answers 404, and the in-process TestClient hides it."""
+    text = (repo_root / "backend" / "requirements.txt").read_text().lower()
+    assert "websockets" in text or "wsproto" in text or "uvicorn[standard]" in text, text

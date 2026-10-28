@@ -1,6 +1,7 @@
 """MD-TEST-004: secrets never in responses, WebSocket frames or server logs (SEC-010), and startup ConfigError cases (S5)."""
 import json
 import os
+import secrets
 import subprocess
 import sys
 import threading
@@ -109,8 +110,6 @@ def test_secrets_never_appear_in_any_response_ws_frame_or_log(leak_rig):
     assert "REDACTED" in blobs["tokenize"] or srv.token not in blobs["tokenize"]
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT API-4: uvicorn's access log is not covered by the log redaction filter, so any secret "
-                                       "a client puts in a URL (query string or path) is written to the log verbatim")
 def test_credentials_in_the_url_do_not_reach_the_server_log(leak_rig):
     """A client that mistakenly puts the token in a query string must not get it written to the access log."""
     srv, _ = leak_rig
@@ -121,6 +120,7 @@ def test_credentials_in_the_url_do_not_reach_the_server_log(leak_rig):
         plain.get(f"/api/v1/tasks/{FAKE_NVIDIA}")
     log = srv.log_text()
     assert srv.token not in log and FAKE_ANTHROPIC not in log and FAKE_NVIDIA not in log
+    assert "/api/v1/executor" in log and "GET" in log, "the access log must still say what was requested"
 
 
 def test_no_stack_traces_or_paths_in_error_responses(shared):
@@ -140,7 +140,7 @@ def _run_main(repo_root, tmp_path, **env):
     return p.returncode, p.stdout + p.stderr
 
 
-GOOD_TOKEN = "t" * 40
+GOOD_TOKEN = secrets.token_urlsafe(32)   # runtime-built; a repeated-character token is now refused as predictable
 
 
 @pytest.mark.parametrize("env,named", [
@@ -205,3 +205,24 @@ def test_docs_are_served_only_with_debug(repo_root, tmp_path):
         assert httpx.get(f"{srv.base}/openapi.json").status_code == 200
     finally:
         srv.stop()
+
+
+@pytest.mark.parametrize("token", ["a" * 32, " " * 32, "ab" * 20, "abc123" * 8, "t" * 40])
+def test_predictable_api_tokens_are_refused_at_startup(token):
+    """Observation from MD-TEST-004 (32 x 'a' used to start the service): now refused, naming the variable, never echoing the value."""
+    from app.config import ConfigError, Settings
+
+    with pytest.raises(ConfigError) as exc:
+        Settings.from_env({"MD_API_TOKEN": token})
+    assert "MD_API_TOKEN" in str(exc.value) and (token.strip() == "" or token not in str(exc.value))
+    assert Settings.from_env({"MD_API_TOKEN": secrets.token_urlsafe(32)}).api_token
+
+
+@pytest.mark.parametrize("rate", ["0", "-5"])
+def test_nonsensical_task_rate_is_refused_at_startup(rate):
+    """Observation from MD-TEST-004 (rate 0 or -5 started and made every submit 429): now a ConfigError."""
+    from app.config import ConfigError, Settings
+
+    with pytest.raises(ConfigError) as exc:
+        Settings.from_env({"MD_API_TOKEN": secrets.token_urlsafe(32), "MD_TASK_RATE_PER_MIN": rate})
+    assert "MD_TASK_RATE_PER_MIN" in str(exc.value)

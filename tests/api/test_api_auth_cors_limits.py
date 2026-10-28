@@ -83,8 +83,6 @@ def test_docs_and_openapi_are_off_without_debug(shared):
         assert httpx.get(shared.base + path).status_code == 404, path
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT API-1: the request body is read and JSON-parsed before the auth check, so an "
-                                       "unauthenticated client gets 422 (and costs memory) instead of 401")
 def test_unauthenticated_post_with_invalid_body_gets_401_not_a_validation_error(shared):
     r = httpx.post(f"{shared.base}/api/v1/tasks", content=b"not json", headers={"content-type": "application/json"})
     assert r.status_code == 401 and r.json() == {"detail": "unauthorized"}
@@ -180,19 +178,46 @@ def test_absurd_and_malformed_content_length_values_are_refused_at_once(shared):
         assert " 413 " in head.split("\r\n")[0] or " 400 " in head.split("\r\n")[0], (value, head[:60])
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT API-1: the 128 KB cap only looks at Content-Length; a chunked upload (no "
-                                       "Content-Length) is read completely (100 MiB took the server from 53 to 254 MB RSS)")
-@pytest.mark.parametrize("authenticated", [True, False])
-def test_chunked_body_over_the_limit_is_also_refused(shared, authenticated):
-    """Content-Length is absent for chunked uploads; the 128 KB cap must still hold."""
-    def chunks():
-        for _ in range(40):  # 40 x 128 KiB = 5 MiB
-            yield b"a" * 131_072
+def _chunks(n=40):
+    for _ in range(n):  # 40 x 128 KiB = 5 MiB, sent chunked: there is no Content-Length to look at
+        yield b"a" * 131_072
 
-    start = time.monotonic()
-    with shared.client(token="__valid__" if authenticated else None) as c:
-        r = c.post("/api/v1/tasks", content=chunks(), headers={"content-type": "application/json"})
-    assert r.status_code == 413, f"got {r.status_code} after {time.monotonic() - start:.2f}s"
+
+def test_chunked_body_over_the_limit_is_refused_with_413(shared):
+    """API-1 (fixed): the cap is enforced while the body streams."""
+    with shared.client() as c:
+        r = c.post("/api/v1/tasks", content=_chunks(), headers={"content-type": "application/json"})
+    assert r.status_code == 413 and r.json() == {"detail": "request body too large"}
+
+
+def test_unauthenticated_chunked_upload_is_401_and_costs_the_server_no_memory(make_server):
+    """API-1 (fixed): authentication happens before a single body byte is read. 100 MiB used to take RSS from 53 to 254 MB."""
+    srv = make_server()
+
+    def rss_mb():
+        for line in open(f"/proc/{srv.proc.pid}/status"):
+            if line.startswith("VmRSS"):
+                return int(line.split()[1]) / 1024
+
+    before = rss_mb()
+    with httpx.Client(base_url=srv.base, timeout=60) as c:
+        r = c.post("/api/v1/tasks", content=_chunks(800), headers={"content-type": "application/json"})
+    assert r.status_code == 401 and r.json() == {"detail": "unauthorized"}
+    with srv.client() as c:
+        big = c.post("/api/v1/tasks", content=_chunks(800), headers={"content-type": "application/json"})
+    assert big.status_code == 413
+    assert rss_mb() - before < 40, f"server grew by {rss_mb() - before:.0f} MB for two 100 MiB uploads"
+
+
+def test_path_tricks_never_reach_a_protected_handler_without_the_token(shared):
+    paths = ["/api/v1/tasks/", "/api/v1//tasks", "/API/v1/tasks", "/api/v1/tasks/.", "/api/v1/../v1/tasks", "//api/v1/tasks",
+             "/api/v1/health/../tasks", "/api/v1/tasks%2f", "/api/%76%31/tasks", "/api/v1/tasks;x=1", "/api/v1/health/", "/api/v1/tasks?x=/api/v1/health"]
+    with httpx.Client(base_url=shared.base, timeout=10, follow_redirects=False) as c:
+        for path in paths:
+            for method in ("GET", "POST"):
+                r = c.request(method, path, json={"instruction": "Move the red cube to the platform"} if method == "POST" else None)
+                assert r.status_code in {401, 404, 405}, f"{method} {path} -> {r.status_code} {r.text[:60]}"
+                assert "task_id" not in r.text and "executor" not in r.text.lower()
 
 
 def test_deeply_nested_json_is_a_clean_4xx_not_a_crash(shared):

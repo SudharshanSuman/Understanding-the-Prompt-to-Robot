@@ -54,10 +54,11 @@ class Server:
                 self.proc.kill()
 
 
-def start_server(repo_root: Path, tmp: Path, *, rate: str | None = "1000", env: dict | None = None, **launcher_env) -> Server:
+def start_server(repo_root: Path, tmp: Path, *, rate: str | None = "1000", env: dict | None = None, port: int | None = None,
+                 **launcher_env) -> Server:
     """Defaults: fallback-only providers, simulated executor, a high task rate (override with rate=None for the product default)."""
     backend = repo_root / "backend"
-    token, port = secrets.token_urlsafe(32), free_port()
+    token, port = secrets.token_urlsafe(32), port or free_port()
     state_file, log_path = str(tmp / f"exec-state-{port}"), tmp / f"server-{port}.log"
     e = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp), "PYTHONPATH": f"{backend}{os.pathsep}{repo_root}",
          "PYTHONDONTWRITEBYTECODE": "1", "MD_API_TOKEN": token, "APP_PORT": str(port), "MD_TEST_STATE_FILE": state_file,

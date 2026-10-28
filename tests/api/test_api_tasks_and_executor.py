@@ -270,15 +270,19 @@ def test_H_executor_that_drops_mid_run_fails_the_task_with_a_safe_message(make_s
     assert "Traceback" not in str(body) and "/home" not in str(body)
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT API-2: TaskManager.run only catches ExecutorError; any other exception from a real "
-                                       "executor escapes the background task and the task stays 'executing' forever")
 def test_H_executor_bug_does_not_leave_the_task_executing_forever(make_server):
+    """API-2 (fixed): any exception from the executor ends the task as failed, with no traceback."""
     srv = make_server(MD_TEST_EXECUTOR="toggle")
     srv.set_executor("crash")
     with srv.client() as c:
         tid = submit(c, GOOD)
         body = wait_status(c, tid, {"failed", "cancelled", "completed"}, timeout=5)
-    assert body["status"] == "failed"
+        assert body["status"] == "failed" and body["error"] == "internal error (RuntimeError)"
+        assert "simulated executor bug" not in str(body) and "Traceback" not in str(body), "internal detail leaked"
+        assert c.post("/api/v1/simulation/e-stop").status_code == 200, "e-stop must still work after an executor bug"
+        assert c.post("/api/v1/simulation/reset").status_code == 200
+        srv.set_executor("disconnected")
+        assert wait_status(c, submit(c, GOOD), FINAL_STATUSES)["status"] == "validated_no_executor"
 
 
 def test_H_status_updates_survive_concurrent_submissions(shared):

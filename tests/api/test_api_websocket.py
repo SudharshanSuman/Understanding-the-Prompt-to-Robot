@@ -72,19 +72,32 @@ def test_idle_authenticated_connection_is_closed(make_server):
     assert time.monotonic() - start < 6
 
 
-@pytest.mark.xfail(strict=True, reason="DEFECT API-3: failed WebSocket authentications are counted but never enforced, so there is "
-                                       "no lockout for token guessing over /ws (HTTP gets 429 after 20 failures)")
-def test_repeated_failed_ws_logins_are_rate_limited_like_http(make_server):
+def test_repeated_failed_ws_logins_are_locked_out_but_the_valid_token_still_works(make_server):
+    """API-3 (fixed): same budget as HTTP (20 failures a minute per client); a valid token is never locked out."""
     srv = make_server()
-    outcomes = []
-    for _ in range(40):
-        try:
-            conn = ws_connect(srv)
-            conn.send(json.dumps({"type": "auth", "token": "wrong"}))
-            outcomes.append(ws_close_code(conn))
-        except InvalidStatus as exc:
-            outcomes.append(exc.response.status_code)
-    assert outcomes[-1] != 4401, f"still answering 4401 after 40 failures: {set(outcomes)}"
+    codes = []
+    for _ in range(30):
+        conn = ws_connect(srv)
+        conn.send(json.dumps({"type": "auth", "token": "wrong"}))
+        codes.append(ws_close_code(conn))
+    assert codes[:20] == [4401] * 20, codes
+    assert set(codes[20:]) == {1008}, codes[20:]          # 'too many failed logins'
+    _authed(srv).close()                                    # the right token still gets in
+    with srv.client() as c:
+        assert c.get("/api/v1/executor").status_code == 200
+
+
+def test_ws_and_http_failures_share_one_budget(make_server):
+    srv = make_server()
+    import httpx
+
+    with httpx.Client(base_url=srv.base) as bad:
+        for _ in range(20):
+            assert bad.get("/api/v1/executor", headers={"Authorization": "Bearer nope"}).status_code == 401
+    conn = ws_connect(srv)
+    conn.send(json.dumps({"type": "auth", "token": "wrong"}))
+    assert ws_close_code(conn) == 1008
+    _authed(srv).close()
 
 
 # --- Origin ---------------------------------------------------------------------------------------------------------------
