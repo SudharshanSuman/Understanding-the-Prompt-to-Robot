@@ -1,4 +1,4 @@
-// /ws/pipeline client: first-message auth, subscribe to all tasks, keepalive ping, reconnect.
+// /ws/pipeline and /ws/telemetry client: first-message auth, subscribe (pipeline only), keepalive ping, reconnect.
 import type { Api } from "./api";
 
 export interface Frame {
@@ -23,6 +23,8 @@ export class PipelineSocket {
     private api: Api,
     private onFrame: (frame: Frame) => void,
     private onState: (state: SocketState) => void,
+    private path = "/ws/pipeline",
+    private subscribe = true, // /ws/telemetry streams without a subscription
   ) {}
 
   start(): void {
@@ -40,7 +42,7 @@ export class PipelineSocket {
 
   private open(): void {
     this.onState("connecting");
-    const ws = new WebSocket(this.api.wsUrl("/ws/pipeline"));
+    const ws = new WebSocket(this.api.wsUrl(this.path));
     this.ws = ws;
     ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token: this.api.tokenForSocket }));
     ws.onmessage = (msg) => {
@@ -54,7 +56,7 @@ export class PipelineSocket {
       if (frame.channel === "system" && frame.payload.type === "auth_ok") {
         this.delay = 1000;
         this.onState("open");
-        ws.send(JSON.stringify({ type: "subscribe" }));
+        if (this.subscribe) ws.send(JSON.stringify({ type: "subscribe" }));
         this.ping = setInterval(() => ws.send(JSON.stringify({ type: "ping" })), PING_MS);
       }
       this.onFrame(frame);

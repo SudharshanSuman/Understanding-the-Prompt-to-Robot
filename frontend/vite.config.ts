@@ -24,6 +24,9 @@ function csp(apiBase: string): Plugin {
   };
 }
 
+// SEC-014-D1: a meta CSP cannot carry frame-ancestors, so the dev and preview servers send it as a header.
+const FRAME_HEADERS = { "Content-Security-Policy": "frame-ancestors 'none'", "X-Frame-Options": "DENY" };
+
 export default defineConfig(({ mode }) => {
   // Only VITE_API_BASE is read: a non-secret URL. Never put a token or key in a VITE_ variable.
   const apiBase = loadEnv(mode, ".", "VITE_").VITE_API_BASE || "http://127.0.0.1:8000";
@@ -31,6 +34,8 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), csp(apiBase)],
     define: { __API_BASE__: JSON.stringify(apiBase) },
     build: { sourcemap: false, target: "es2022" },
+    server: { headers: FRAME_HEADERS },
+    preview: { headers: FRAME_HEADERS },
     test: { environment: "jsdom", include: ["src/**/*.test.tsx"] },
   };
 });

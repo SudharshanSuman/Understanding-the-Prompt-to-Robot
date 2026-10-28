@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Api, ApiError, DEFAULT_API_BASE } from "./api";
 import { desktopBridge, type DesktopSession } from "./desktop";
 import { PipelineSocket, type Frame, type SocketState } from "./socket";
+import { telemetryPose } from "./kinematics";
+import { useReplay, type RecordedFrame } from "./replay";
 import {
   FINAL_STATUSES, type Environment, type ExecutorStatus, type Health, type PipelineEvent, type ProviderStatus,
   type RosStub, type StopReport, type TaskDetail, type TaskSummary, type TokenizationResult,
@@ -9,11 +11,14 @@ import {
 import { Header } from "./components/Header";
 import { CommandPanel } from "./components/CommandPanel";
 import { SceneView } from "./components/SceneView";
+import { FlowView } from "./components/FlowView";
 import { StageList } from "./components/StageList";
 import { StageDetail } from "./components/StageDetail";
 import { Inspector, type LogEntry } from "./components/Inspector";
 
 const MAX_LOGS = 300;
+const MAX_FRAMES_PER_TASK = 7500; // 25 min at the 5 Hz telemetry stream
+const MAX_RECORDED_TASKS = 5;
 
 interface ConnectProps {
   onConnect: (base: string, token: string) => void;
@@ -68,6 +73,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [stopping, setStopping] = useState(false); // e-stop has its own flag: unrelated work must never block it
   const currentId = useRef<string | null>(null);
+  // Telemetry frames recorded per task id (as the executor reports it), for replay of the last run.
+  const recorded = useRef<Map<string, RecordedFrame[]>>(new Map());
 
   const log = useCallback((level: LogEntry["level"], text: string) => {
     setLogs((l) => [...l.slice(-MAX_LOGS + 1), { at: new Date().toLocaleTimeString(), level, text }]);
@@ -147,14 +154,37 @@ export default function App() {
     };
     const s = new PipelineSocket(api, onFrame, (st) => { setSocket(st); log(st === "open" ? "info" : "warn", `live stream ${st}`); });
     s.start();
+    const onTelemetry = (f: Frame) => {
+      if (f.channel !== "telemetry") return;
+      setTelemetry(f.payload as RosStub);
+      const pose = telemetryPose(f.payload);
+      if (!pose?.taskId) return;
+      const map = recorded.current;
+      const list = map.get(pose.taskId) ?? [];
+      if (!map.has(pose.taskId)) {
+        map.set(pose.taskId, list);
+        while (map.size > MAX_RECORDED_TASKS) map.delete(map.keys().next().value as string);
+      }
+      list.push({ at: pose.time !== null ? pose.time * 1000 : Date.now(), payload: f.payload });
+      if (list.length > MAX_FRAMES_PER_TASK) list.shift();
+    };
+    const ts = new PipelineSocket(api, onTelemetry, (st) => { if (st !== "open") log("warn", `telemetry stream ${st}`); },
+      "/ws/telemetry", false);
+    ts.start();
     void refreshStatus(api);
     void api.tasks().then(setHistory).catch((e) => fail("history", e));
     void api.environment().then(setEnv).catch((e) => fail("environment", e));
     void api.telemetry().then(setTelemetry).catch((e) => fail("telemetry", e));
     void api.inspector().then(setInspector).catch((e) => fail("inspector", e));
     const timer = setInterval(() => void refreshStatus(api), 10_000);
-    return () => { s.stop(); clearInterval(timer); };
+    return () => { s.stop(); ts.stop(); clearInterval(timer); };
   }, [api, fail, log, openTask, refreshStatus]);
+
+  const taskEvents = current ? events[current.task_id] ?? current.events : [];
+  const replayId = current && FINAL_STATUSES.has(current.status) ? current.task_id : null;
+  const replay = useReplay(taskEvents, () => (replayId ? recorded.current.get(replayId) ?? [] : []));
+  const stopReplay = replay.stop;
+  useEffect(() => stopReplay(), [current?.task_id, stopReplay]); // a different task ends any replay
 
   if (!api) return <Connect key={desktop?.apiBase ?? ""} onConnect={connect} error={connectError} desktop={desktop} />;
 
@@ -172,7 +202,9 @@ export default function App() {
     setHistory(await api.tasks());
   });
 
-  const taskEvents = current ? events[current.task_id] ?? current.events : [];
+  const shownEvents = replay.state.active ? taskEvents.slice(0, replay.state.eventCount) : taskEvents;
+  const livePose = telemetryPose(telemetry);
+  const pose = replay.state.active ? telemetryPose(replay.state.frame?.payload) : livePose;
   const task = current?.task as { target_object?: string; destination?: string } | null | undefined;
 
   return (
@@ -217,7 +249,14 @@ export default function App() {
           await openTask(api, id);
         })}
       />
-      <SceneView env={env} target={task?.target_object ?? null} destination={task?.destination ?? null} />
+      <div className="center center-stack">
+        <FlowView events={shownEvents} instruction={current?.instruction ?? null}
+                  replay={replay.state} canReplay={replayId !== null && taskEvents.length > 0}
+                  onReplay={replay.start} onStopReplay={replay.stop} />
+        <SceneView env={env} target={task?.target_object ?? null} destination={task?.destination ?? null}
+                   pose={pose} replaying={replay.state.active}
+                   telemetryReason={telemetry && telemetry.available === false ? String(telemetry.reason ?? "ros unavailable") : null} />
+      </div>
       <aside className="panel right" aria-label="Pipeline">
         <h2 className="panel-title">
           Pipeline {current && <span className={`status status--${current.status}`}>{current.status.replace(/_/g, " ")}</span>}
