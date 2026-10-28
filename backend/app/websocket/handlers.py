@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from app.api.security import Guard, safe_dumps
 from app.config import Settings
-from app.api.routes import ROS_UNAVAILABLE
+from app.api.routes import telemetry_payload
 from app.security import MAX_RAW_CHARS, InputRejected, sanitize_instruction
 from app.tasks import TaskManager, TaskNotFound
 from app.tokenizer import get_tokenizer
@@ -25,6 +25,7 @@ from app.tokenizer import get_tokenizer
 # too many failed logins), 1009 too big, 1013 try later (connection cap), 4401 wrong or malformed auth message.
 CLOSE_UNSUPPORTED, CLOSE_POLICY, CLOSE_TOO_BIG, CLOSE_BUSY, CLOSE_UNAUTHORIZED = 1003, 1008, 1009, 1013, 4401
 OUTBOX_SIZE = 1000
+TELEMETRY_PERIOD_S = 0.2  # matches the ROS side (5 Hz) so the 3D arm moves smoothly; frames are never interpolated
 
 
 class _Msg(BaseModel):
@@ -99,6 +100,7 @@ class Session:
         self.manager: TaskManager = app.state.manager
         self.outbox: asyncio.Queue = asyncio.Queue(maxsize=OUTBOX_SIZE)
         self.subscription = None
+        self.background: list[asyncio.Task] = []
 
     async def send(self, frame: dict) -> None:
         await self.ws.send_text(safe_dumps(frame, self.guard.secrets()))
@@ -173,6 +175,8 @@ async def _serve(ws: WebSocket, on_ready, on_message) -> None:
     finally:
         if pump:
             pump.cancel()
+        for task in session.background:
+            task.cancel()
         session.manager.unsubscribe(session.subscription)
         slots.release()
 
@@ -220,11 +224,26 @@ async def pipeline_ws(ws: WebSocket) -> None:
 
 
 async def telemetry_ws(ws: WebSocket) -> None:
+    def snapshot(session: Session) -> dict:
+        payload = telemetry_payload(session.manager.executor)
+        session.queue("telemetry", payload)
+        return payload
+
+    async def stream(session: Session, available: bool) -> None:
+        # Live data streams; 'unavailable' is sent once per change, not repeated every tick.
+        while True:
+            await asyncio.sleep(TELEMETRY_PERIOD_S)
+            payload = telemetry_payload(session.manager.executor)
+            if payload["available"] or available:
+                session.queue("telemetry", payload)
+            available = payload["available"]
+
     async def ready(session: Session) -> None:
-        session.queue("telemetry", dict(ROS_UNAVAILABLE))
+        first = snapshot(session)
+        session.background.append(asyncio.create_task(stream(session, first["available"])))
 
     async def message(session: Session, msg) -> None:
         if not await _common(session, msg):
-            session.queue("telemetry", dict(ROS_UNAVAILABLE))
+            snapshot(session)
 
     await _serve(ws, ready, message)

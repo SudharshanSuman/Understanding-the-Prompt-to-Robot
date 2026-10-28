@@ -94,6 +94,15 @@ class Executor(ABC):
     def reset(self) -> ExecutorStatus:
         """Clear the e-stop latch; motion commands are refused until this is called."""
 
+    def telemetry(self) -> dict | None:
+        """Latest live robot/scene snapshot (JSON-able), or None when there is no live data. Must not block or raise."""
+        return None
+
+    def readiness(self) -> dict[str, bool] | None:
+        """Per-part readiness, e.g. {'move_action', 'arm_controller', 'gripper_controller', 'joint_states'} (fresh),
+        or None when the executor does not report it. Must not block or raise."""
+        return None
+
 
 class SimulatedExecutor(Executor):
     """No-ROS stand-in. Holds an in-memory joint state; never executes a task."""

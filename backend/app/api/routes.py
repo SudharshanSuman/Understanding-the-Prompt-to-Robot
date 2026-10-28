@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.security import client_key, require_token
-from app.executor import ExecutorStatus
+from app.executor import Executor, ExecutorStatus
 from app.providers import ProviderStatus
 from app.schemas import TokenizationResult
 from app.security import MAX_RAW_CHARS, InputRejected, sanitize_instruction
@@ -17,6 +18,29 @@ from app.tokenizer import get_tokenizer
 
 ROS_UNAVAILABLE = {"available": False, "reason": "ros unavailable",
                    "detail": "ROS 2 is not connected to this backend; nothing here is live data"}
+TELEMETRY_UNAVAILABLE = {**ROS_UNAVAILABLE, "joint_states": None, "gripper": None, "end_effector_pose": None}
+
+
+def _finite(value):
+    """NaN/inf are not JSON and must never read as data: they become null."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(k): _finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(v) for v in value]
+    return value
+
+
+def telemetry_payload(executor: Executor) -> dict:
+    """The executor's live snapshot, or the honest 'ros unavailable' stub. A failing executor is unavailable."""
+    try:
+        snapshot = executor.telemetry()
+    except Exception:
+        snapshot = None
+    if not isinstance(snapshot, dict):
+        return dict(TELEMETRY_UNAVAILABLE)
+    return {"available": True, "source": executor.name, "data": _finite(snapshot)}
 
 
 class _Body(BaseModel):
@@ -61,12 +85,34 @@ public = APIRouter(prefix="/api/v1")
 protected = APIRouter(prefix="/api/v1", dependencies=[Depends(require_token)])
 
 
+def ros_parts(executor: Executor, status: ExecutorStatus) -> dict[str, str]:
+    """ros2/gazebo/moveit as 'available', 'unavailable' or 'unknown', only from what the executor reports.
+
+    With per-part readiness: ROS 2 is up when any part answers; Gazebo when fresh /joint_states arrive (the sim's
+    ros2_control publishes them); MoveIt when its move_group action server is ready. Without it: a connected
+    executor means every part is ready; live telemetry alone proves ROS 2 only; otherwise nothing is up.
+    """
+    try:
+        ready = executor.readiness()
+    except Exception:
+        ready = None
+    if isinstance(ready, dict):
+        up = lambda ok: "available" if ok else "unavailable"  # noqa: E731
+        return {"ros2": up(any(ready.values())), "gazebo": up(ready.get("joint_states") is True),
+                "moveit": up(ready.get("move_action") is True)}
+    if status.connected:
+        return {"ros2": "available", "gazebo": "available", "moveit": "available"}
+    if telemetry_payload(executor)["available"]:
+        return {"ros2": "available", "gazebo": "unknown", "moveit": "unknown"}
+    return {"ros2": "unavailable", "gazebo": "unavailable", "moveit": "unavailable"}
+
+
 @public.get("/health")
 def health(request: Request) -> dict:
     """Unauthenticated: reports only what is up, never keys, paths or configuration."""
-    executor = manager(request).executor.status()
-    return {"status": "ok", "ros2": "unavailable", "gazebo": "unavailable", "moveit": "unavailable",
-            "executor_connected": executor.connected}
+    executor = manager(request).executor
+    status = executor.status()
+    return {"status": "ok", **ros_parts(executor, status), "executor_connected": status.connected}
 
 
 # --- tasks ----------------------------------------------------------------------------------
@@ -136,8 +182,17 @@ def emergency_stop(request: Request):
 @protected.post("/simulation/reset")
 def reset_simulation(request: Request) -> dict:
     status = manager(request).executor.reset()
-    return {"status": "resetting", "e_stop_latched": status.e_stop_latched,
-            "scene_reset": "ros unavailable: Gazebo scene not reset"}
+    return {"status": "resetting", "e_stop_latched": status.e_stop_latched, "scene_reset": scene_reset(status)}
+
+
+def scene_reset(status: ExecutorStatus) -> str:
+    """The executor's own scene-reset result ('...; scene: <result>'); never claims a reset it did not report."""
+    _, sep, scene = status.detail.partition("; scene: ")
+    if sep and scene:
+        return scene
+    if not status.connected:
+        return "ros unavailable: Gazebo scene not reset"
+    return "not reported by the executor: Gazebo scene state unknown"
 
 
 @protected.get("/executor", response_model=ExecutorStatus)
@@ -180,14 +235,24 @@ def tokenize(body: TokenizeText, request: Request) -> TokenizationResult:
 # --- ROS-side stubs: honest 'ros unavailable' until the ROS 2 orchestrator is connected -----
 @protected.get("/environment/objects")
 def environment_objects(request: Request) -> dict:
-    world = manager(request).validator.world
-    return {**ROS_UNAVAILABLE, "perception_mode": "unavailable", "objects": [],
-            "scene_config": {"objects": sorted(world.object_ids()), "destinations": sorted(world.destination_ids())}}
+    tasks = manager(request)
+    world = tasks.validator.world
+    scene = {"objects": sorted(world.object_ids()), "destinations": sorted(world.destination_ids())}
+    live = telemetry_payload(tasks.executor)
+    data = live.get("data") or {}
+    positions = data.get("objects") if isinstance(data.get("objects"), dict) else None
+    if not live["available"] or positions is None:
+        return {**ROS_UNAVAILABLE, "perception_mode": "unavailable", "objects": [], "scene_config": scene}
+    objects = [{"id": str(k), "position": v} for k, v in sorted(positions.items())
+               if isinstance(v, list) and len(v) == 3 and all(isinstance(n, (int, float)) for n in v)]
+    perception = data.get("perception") if isinstance(data.get("perception"), str) else "unknown"
+    return {"available": True, "source": live["source"], "time": data.get("time"), "perception_mode": perception,
+            "objects": objects, "scene_config": scene}
 
 
 @protected.get("/telemetry")
-def telemetry() -> dict:
-    return {**ROS_UNAVAILABLE, "joint_states": None, "gripper": None, "end_effector_pose": None}
+def telemetry(request: Request) -> dict:
+    return telemetry_payload(manager(request).executor)
 
 
 @protected.get("/ros/inspector")

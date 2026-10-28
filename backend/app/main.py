@@ -104,11 +104,12 @@ def create_app(
     return app
 
 
-def main() -> None:
+def main(executor: Executor | None = None) -> None:
+    """Serve on MD_BIND_HOST/APP_PORT (validated). ROS launchers pass their executor here, e.g. main(RosExecutor())."""
     import uvicorn
 
     settings = Settings.from_env()
-    uvicorn.run(create_app(settings), host=settings.host, port=settings.port, server_header=False)
+    uvicorn.run(create_app(settings, executor=executor), host=settings.host, port=settings.port, server_header=False)
 
 
 if __name__ == "__main__":
