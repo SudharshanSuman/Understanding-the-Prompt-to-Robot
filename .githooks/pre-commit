@@ -38,7 +38,8 @@ if [ -n "$added" ]; then
   scan "Slack token"             '\bxox[abprs]-[A-Za-z0-9-]{10,}'
   scan "Google API key"          '\bAIza[0-9A-Za-z_-]{35}\b'
   scan "private key block"       '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----'
-  scan "hard-coded credential"   '(API_KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Za-z0-9_]*["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_/+=.-]{20,}'
+  scan "hard-coded credential"   '(API_KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Za-z0-9_]*["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_/+=-]{20,}'
+  scan "JSON web token"          '\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.'
   scan "Dockerfile ENV secret"   '^[^:]*:[0-9]+:[[:space:]]*(ENV|ARG)[[:space:]]+[A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)[A-Za-z0-9_]*[ =][^$[:space:]]+'
 fi
 
