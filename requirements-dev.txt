@@ -1,0 +1,5 @@
+# Development and test dependencies (includes runtime dependencies)
+# For hash-pinned reproducible installs on Linux x86_64 / CPython 3.12:
+#   pip install --require-hashes --no-deps -r backend/requirements-dev.lock
+-r requirements.txt
+-r backend/requirements-dev.txt

@@ -1,0 +1,5 @@
+# Understanding the Prompt to Robot / Munder Difflin
+# Python runtime dependencies
+# For hash-pinned reproducible installs on Linux x86_64 / CPython 3.12:
+#   pip install --require-hashes --no-deps -r backend/requirements.lock
+-r backend/requirements.txt
