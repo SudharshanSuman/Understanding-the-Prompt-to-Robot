@@ -94,3 +94,19 @@ This changes the graphics stack on a hybrid laptop. Do it on purpose, not as par
 
 See the quick start in `../README.md`, `frontend/README.md` (browser mode) and `desktop/README.md`
 (desktop mode). Model provider keys: `docs/model_configuration.md`.
+
+### With the ROS 2 executor (real sim)
+
+The backend runs tasks through `RosExecutor` (Andy's `munder_difflin_control`, see `docs/ros2_interfaces.md` s7) when a
+launcher passes it to `app.main.main(executor)`. That entry keeps the startup checks: it binds `MD_BIND_HOST`/`APP_PORT`
+and refuses a weak `MD_API_TOKEN`. Start the sim and `move_group` first (`ros2 launch munder_difflin_bringup moveit.launch.py`), then:
+
+```bash
+source /opt/ros/jazzy/setup.bash && source ros2_ws/install/setup.bash
+export ROS_DOMAIN_ID=42 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST ROS_LOCALHOST_ONLY=1  # localhost-only DDS (SEC-011)
+cd backend && PYTHONPATH="$PWD:$PWD/../ros2_ws/pylib" .venv/bin/python -c \
+  'from app.main import main; from munder_difflin_control.ros_executor import RosExecutor; main(RosExecutor())'
+```
+Use `ros2_ws/pylib`, not `/usr/lib/python3/dist-packages` (its `typing_extensions` breaks pydantic).
+`/api/v1/telemetry` and `/ws/telemetry` show live data only when the executor implements `telemetry()`; otherwise they say
+"ros unavailable".

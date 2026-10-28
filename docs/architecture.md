@@ -51,33 +51,26 @@ graph TD
         end
     end
 
-    subgraph ROS2_Workspace ["ROS 2 Middleware Layer (rclpy / C++)"]
-        ROS_Bridge_Node["Backend-to-ROS 2 Bridge Node"]
-        
-        subgraph Perception_Module ["Perception & Grounding (munder_difflin_perception)"]
-            GroundTruth_Node["Ground-Truth Extractor"]
-            Vision_Node["RGB-D Vision & Detection Node"]
-            TF2_Broadcaster["tf2 Transform Broadcaster"]
+    subgraph ROS2_Workspace ["ROS 2 Execution Layer (munder_difflin_control & MoveIt 2)"]
+        subgraph Control_Module ["In-Process Executor (munder_difflin_control)"]
+            RosExecutor_Node["RosExecutor (rclpy)<br/>[Implements backend app/executor.py]"]
+            Grasp_Manager["Grasp Manager (DetachableJoint Trigger)"]
+            Safety_Monitor["Safety Monitor & E-Stop (/emergency_stop)"]
+            Verifier_Node["Placement Verifier (Ground-Truth Poses)"]
         end
 
-        subgraph Planning_Module ["Motion Planning (munder_difflin_planning)"]
-            MoveIt_Node["MoveIt 2 Planning Interface"]
-            IK_Service["Inverse Kinematics Solver"]
+        subgraph Planning_Stack ["MoveIt 2 Stack (moveit_resources_panda)"]
+            MoveGroup_Node["move_group node (/move_action)"]
             Scene_Monitor["Planning Scene & Collision Monitor"]
-        end
-
-        subgraph Control_Module ["Control & Verification (munder_difflin_control)"]
-            Grasp_Manager["Grasp & Gripper Action Server"]
-            Safety_Monitor["Safety Monitor & E-Stop Interlock"]
-            Verifier_Node["Task State Verifier"]
+            IK_Service["KDL Kinematics Solver"]
         end
     end
 
     subgraph Simulation_Layer ["Physics Simulation (Gazebo Harmonic)"]
-        GZ_World["Gazebo World (Table, Objects, Bins)"]
-        GZ_Robot["Robot Model ([TBD-arm-audit] + Gripper)"]
-        ROS_GZ_Bridge["ros_gz_bridge (Clock, Joints, TF, Sensors)"]
-        ROS2_Control["ros2_control Joint Trajectory Controllers"]
+        GZ_World["Gazebo World (munder_difflin.sdf)<br/>Table, Cubes, Platforms, DetachableJoint"]
+        GZ_Robot["Panda 7-DOF Arm + Franka Hand"]
+        ROS_GZ_Bridge["ros_gz_bridge (/clock, /model/*/pose, /joint_states)"]
+        ROS2_Control["ros2_control Joint Trajectory Controllers<br/>/panda_arm_controller, /panda_hand_controller"]
     end
 
     %% Connections
@@ -90,26 +83,26 @@ graph TD
     Provider_Router -->|Raw Proposal| Schema_Validator
     Schema_Validator --> Lexicon_Checker
     Lexicon_Checker --> Feasibility_Checker
-    Feasibility_Checker -->|Validated RoboticTask| ROS_Bridge_Node
+    Feasibility_Checker -->|Validated RoboticTask| RosExecutor_Node
 
-    ROS_Bridge_Node --> MoveIt_Node
-    Perception_Module -->|Object Poses| Scene_Monitor
-    Perception_Module -->|TF Trees| TF2_Broadcaster
-    MoveIt_Node --> IK_Service
-    Scene_Monitor --> MoveIt_Node
-    MoveIt_Node -->|Trajectory Action| ROS2_Control
-    ROS_Bridge_Node --> Grasp_Manager
-    Grasp_Manager --> ROS2_Control
+    RosExecutor_Node -->|Pose Query| ROS_GZ_Bridge
+    RosExecutor_Node -->|Planning Request| MoveGroup_Node
+    MoveGroup_Node --> IK_Service
+    MoveGroup_Node --> Scene_Monitor
+    MoveGroup_Node -->|Joint Trajectory Action| ROS2_Control
+    RosExecutor_Node -->|Gripper Cmd Action| ROS2_Control
+    RosExecutor_Node --> Grasp_Manager
+    Grasp_Manager -->|Attach/Detach Topics| GZ_World
     
     ROS2_Control --> GZ_Robot
     ROS_GZ_Bridge <--> GZ_World
     
-    Control_Module --> Verifier_Node
-    Verifier_Node -->|State Verification| ROS_Bridge_Node
-    ROS_Bridge_Node -->|Execution Events| Task_Orchestrator
+    RosExecutor_Node --> Verifier_Node
+    Verifier_Node -->|Read Pose Verification| ROS_GZ_Bridge
+    RosExecutor_Node -->|PipelineStageEvents| Task_Orchestrator
     Task_Orchestrator -->|WebSocket Stream| UI_Pipeline
     Task_Orchestrator -->|WebSocket Stream| UI_Inspector
-    ROS_Bridge_Node -->|Telemetry Stream| UI_View
+    RosExecutor_Node -->|Telemetry Stream| UI_View
 ```
 
 ---
@@ -285,15 +278,20 @@ stateDiagram-v2
 - **Coordinate Transformations (`tf2`):** Transforms all bounding boxes and target pick poses into the robot's base coordinate frame (`panda_link0`).
 
 ### 5.4 Motion Planning Subsystem (MoveIt 2)
-- **Primary Manipulator (ADR-006):** Franka Emika Panda (7-DOF) with native Franka Hand parallel jaw gripper. Packages pre-built in Jazzy apt (`ros-jazzy-moveit-resources-panda-*`). Fallback: Universal Robots UR5e (`ros-jazzy-ur-simulation-gz`).
+- **Primary Manipulator (ADR-006 & ADR-012):** Franka Emika Panda (7-DOF) with native Franka Hand parallel jaw gripper. Packages specified from official ROS 2 Jazzy apt binaries: `ros-jazzy-moveit-resources-panda-description` and `ros-jazzy-moveit-resources-panda-moveit-config` (superseding `franka_ros2` per ADR-012 to avoid `libfranka` hardware mocks and `fer_*` joint renames). Fallback: Universal Robots UR5e (`ros-jazzy-ur-simulation-gz`).
 - **Planning Pipeline:** MoveIt 2 OMPL (defaulting to RRTConnect or Pilz industrial planner for linear Cartesian paths).
-- **Planning Groups:** `panda_arm` (7 joints) and `panda_hand` (2 finger joints).
+- **Planning Groups:** `panda_arm` (7 joints: `panda_joint1..7`) and `panda_hand` (2 finger joints: `panda_finger_joint1..2`).
+- **Base and Tool Frames:** Base is `panda_link0`, tool tip is `panda_hand`.
 - **Planning Scene Representation:** Dynamic collision objects representing table, storage bins, and obstacle objects (e.g., `blue_cube` when instructed "avoid blue cube").
 - **Kinematics:** KDL or PickNik TrackIK kinematics solver plugin for 7-DOF redundancy resolution.
 
 ### 5.5 Control & Physics Execution Subsystem (Gazebo Harmonic & `ros2_control`)
 - **Physics Engine:** Gazebo Harmonic (gz-sim 8) with DART physics. (Isaac Sim is designated as an optional cloud extension per ADR-010).
-- **Actuation Control:** `panda_arm_controller` (`joint_trajectory_controller`) and `panda_hand_controller` commanding hardware interfaces via `ros2_control`.
+- **Simulation Bringup:** `ros2 launch munder_difflin_bringup sim.launch.py` (verified headless Gazebo execution with `gz_ros2_control`).
+- **Active Controllers (Verified Live in Simulation):**
+  - `panda_arm_controller`: `joint_trajectory_controller/JointTrajectoryController` active on `/panda_arm_controller/follow_joint_trajectory`.
+  - `panda_hand_controller`: `position_controllers/GripperActionController` active on `/panda_hand_controller/gripper_cmd`.
+  - `joint_state_broadcaster`: active publishing to `/joint_states`.
 - **Hybrid Grasping Architecture (ADR-007):**
   1. *Physical friction grasp* (compliant gripper fingers with realistic contact coefficients).
   2. *Simulator attach plugin* (Gazebo `gz-sim-detachable-joint-system`) dynamically triggered upon verified finger closure to lock the object rigidly during transit and prevent acceleration drops.
@@ -357,3 +355,15 @@ In direct compliance with Security Engineer Dwight's audit (`docs/project/SECURI
 - **Gate D (Testing):** Angela (T) verifies acceptance tests A through J.
 - **Gate E (Security):** Dwight (SEC) audits credential handling, untrusted model output safety interlocks, and dependency vulnerabilities.
 - **Gate F (Release):** Stanley (REL) confirms packaging, reproducible launch scripts, and release criteria.
+
+---
+
+## 9. Known Architectural Limitations
+
+In compliance with ADR-013 and verified project delivery:
+1. **Single-Process Execution Coupling:**
+   Task execution, grasp state tracking, placement verification, and perception parsing run in the same Python process as `RosExecutor` (`munder_difflin_control.ros_executor`). They are not independently restartable microservice nodes. If the executor process terminates, active execution tracking halts.
+2. **Perception Ground-Truth Baseline:**
+   Perception currently ingests simulation ground-truth poses directly from Gazebo (`/model/<id>/pose`). This is explicitly exposed as `simulation_ground_truth` and does not claim to be a vision-based pointcloud segmentation pipeline. The interface (`ObjectPoseSource`) is swappable for future RGB-D vision nodes.
+3. **Local GPU Inference Infeasibility:**
+   Due to host hardware constraints (4 GB VRAM on RTX 3050 Mobile with `nouveau` driver), local LLM inference is disabled. System relies on Cloud APIs, remote NVIDIA NIM endpoints, and a deterministic offline fallback parser.

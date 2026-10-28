@@ -19,6 +19,8 @@
 - [ADR-009: Canonical 14-Stage Execution Pipeline Specification](#adr-009-canonical-14-stage-execution-pipeline-specification)
 - [ADR-010: Isaac Sim Evaluation and Cloud-Only Extension Boundary](#adr-010-isaac-sim-evaluation-and-cloud-only-extension-boundary)
 - [ADR-011: Pre-Interpretation Ambiguity Gating and Headless Terminal Stage Invariant](#adr-011-pre-interpretation-ambiguity-gating-and-headless-terminal-stage-invariant)
+- [ADR-012: Panda Model Specification via apt moveit_resources_panda (Supersedes franka_ros2 part of ADR-006)](#adr-012-panda-model-specification-via-apt-moveit_resources_panda-supersedes-franka_ros2-part-of-adr-006)
+- [ADR-013: Formal In-Process RosExecutor Architecture (Supersedes Custom ROS Action Stack)](#adr-013-formal-in-process-rosexecutor-architecture-supersedes-custom-ros-action-stack)
 
 ---
 
@@ -250,3 +252,79 @@ Pam (D) identified two operational issues during backend implementation of the 1
   - Satisfies Acceptance Test I (`test_every_stage_ends_in_a_terminal_ui_state` passes without hanging states).
   - Eliminates infinite spinners or ambiguous statuses in UI telemetry.
 - **Negative:** None. Fully adheres to formal state machine semantics.
+
+---
+
+## ADR-012: Panda Model Specification via apt moveit_resources_panda (Supersedes franka_ros2 part of ADR-006)
+
+### Context
+ADR-006 initially specified Franka Emika Panda using upstream `franka_ros2` / `franka_description`. During live workspace bringup (MD-ROS-001 Milestone 1), Integration Engineer Andy (`andy-integration-engineer-i--mvr0ckuy`) audited the actual ROS 2 Jazzy packages and uncovered two major integration obstacles with `franka_ros2`:
+1. Upstream `franka_description` in the Jazzy branch models the Franka Emika Research 3 (FER / FR3) arm with renamed joints (`fer_joint1..7`, `fer_finger_joint1/2`, `fer_link0`, `fer_hand`), breaking the contract names established in `INTERFACE_CONTRACTS.md` Section 8.
+2. `franka_ros2` introduces hardware plugin dependencies on `libfranka` and real robot communication libraries, which require invasive mock plugin exclusions for pure simulation.
+
+Conversely, the official Debian binary packages `ros-jazzy-moveit-resources-panda-description` and `ros-jazzy-moveit-resources-panda-moveit-config` are pre-compiled and readily installable via `apt`:
+- Uses the standard, canonical naming: `panda_joint1` through `panda_joint7`, `panda_finger_joint1`, `panda_finger_joint2`, `panda_link0`, and `panda_hand`.
+- Contains zero `libfranka` hardware dependencies.
+- Has been verified running live in Gazebo Harmonic with active `ros2_control` controllers: `panda_arm_controller` (JointTrajectoryController) and `panda_hand_controller` (GripperActionController).
+
+### Decision
+1. **Model Source Supersession:**
+   - Explicitly supersede the `franka_ros2`/`franka_description` packaging recommendation of ADR-006.
+   - Authoritatively specify **`moveit_resources_panda_description`** and **`moveit_resources_panda_moveit_config`** (from `ros-jazzy-moveit-resources-panda-*`) as the official Panda model and MoveIt 2 configuration source for Munder Difflin.
+2. **Canonical Naming Confirmed from Live Graph:**
+   - Joint Names: `panda_joint1`, `panda_joint2`, `panda_joint3`, `panda_joint4`, `panda_joint5`, `panda_joint6`, `panda_joint7`.
+   - Gripper Finger Joints: `panda_finger_joint1`, `panda_finger_joint2`.
+   - Links: Base link is `panda_link0`; end-effector planning frame is `panda_hand`.
+   - Active Controllers:
+     - `/panda_arm_controller/follow_joint_trajectory` (`control_msgs/action/FollowJointTrajectory`)
+     - `/panda_hand_controller/gripper_cmd` (`control_msgs/action/GripperCommand`)
+     - `joint_state_broadcaster` on `/joint_states` (`sensor_msgs/msg/JointState`)
+3. **Simulation Launch Entrypoint:**
+   - Authoritative launch command: `ros2 launch munder_difflin_bringup sim.launch.py` (runs Gazebo Harmonic headless with `-s`, optional `rviz:=true`).
+4. **Fallback Retained:**
+   - Universal Robots UR5e via `ros-jazzy-ur-simulation-gz` is retained as the secondary fallback.
+
+### Consequences
+- **Positive:**
+  - 100% zero-compilation, zero-sudo apt deployment for the robot arm model.
+  - Matches live verified test evidence (`m1_controllers.log`, `m1_trajectory.log` showing 0.4 rad joint motion, error_code 0).
+  - Preserves exact contract naming without requiring translation layers or joint re-mapping.
+- **Negative:** None. Fully aligned with upstream ROS 2 Jazzy MoveIt 2 standards.
+
+---
+
+## ADR-013: Formal In-Process RosExecutor Architecture (Supersedes Custom ROS Action Stack)
+
+### Context
+During integration of the simulation backend with the ROS 2 workspace (MD-ROS-001), Integration Engineer Andy developed `RosExecutor` in `munder_difflin_control.ros_executor`. A architectural decision was required from `god` regarding whether to build dedicated custom ROS packages and action interfaces (`munder_difflin_msgs`, `/munder_difflin/execute_task`, `/grasp`, `/verification/verify_placement`, `/perception/detected_objects`) or adopt an in-process execution model.
+
+Building custom ROS action packages introduces colcon build complexity, separate package maintenance, and inter-process serialization overhead for tasks orchestrated by the backend. In contrast, standard ROS 2 actions provided by MoveIt 2 (`/move_action` via `moveit_msgs/action/MoveGroup`) and ros2_control (`/panda_arm_controller/follow_joint_trajectory`, `/panda_hand_controller/gripper_cmd`) are active, verified in simulation, and directly accessible via `rclpy`.
+
+### Decision (Authoritative Decision from Orchestrator / God)
+1. **In-Process Execution Model:**
+   - **Do NOT build `munder_difflin_msgs` or custom ROS action/service servers** (`/munder_difflin/execute_task`, `/munder_difflin/grasp`, `/munder_difflin/verification/verify_placement`, `/perception/detected_objects`).
+   - Andy's **`RosExecutor`** (`munder_difflin_control.ros_executor.RosExecutor`, implementing the backend abstraction `backend/app/executor.py::Executor`) is the sole execution driver for the ROS 2 simulation. It executes grasping, placement verification, and perception in-process.
+   - Downstream pipeline stages (`grounding`, `planning_scene`, `ik`, `planning`, `trajectory_validation`, `execution`, `simulation`, `verification`) are driven directly by `RosExecutor` calling standard MoveIt 2 actions, ros2_control controllers, and Gazebo topic bridges.
+2. **Swappable Object-Pose Perception Abstraction:**
+   - The perception interface retains a clean swappable design (`ObjectPoseSource` protocol).
+   - Currently, `RosExecutor` ingests Gazebo ground-truth poses from `/model/{red_cube,blue_cube,green_cylinder}/pose` (20 Hz).
+   - Future RGB-D camera perception connects into the identical `ObjectPoseSource` interface without altering task planning or execution pipelines.
+3. **MoveIt 2 Planning Group Naming:**
+   - In `config/panda.srdf`, upstream group `hand` was explicitly renamed to `panda_hand` to maintain 100% adherence to `INTERFACE_CONTRACTS.md`.
+4. **Gripper Kinematics and Mimic Joint:**
+   - `panda_finger_joint1` is the active command joint; `panda_finger_joint2` mimics it. Position travel is parameterized as 0.0 m (closed) to 0.04 m (open) per finger (total grip span 0.08 m).
+5. **Emergency Stop Verification (SEC-013):**
+   - The service `/munder_difflin/safety/emergency_stop` cancels active MoveIt goals, deactivates `panda_arm_controller`, samples `/joint_states` joint velocities across 10 iterations, and only reports `e_stop_confirmed: true` if all velocities are $< 1e-4\text{ rad/s}$ and controller state is `inactive`.
+6. **Known Architectural Limitation:**
+   - **Single-Process Coupling:** All task execution, grasp state tracking, placement verification, and perception grounding run inside the single `RosExecutor` process. They are not independently restartable microservice nodes. If the executor process terminates, all active control loops and state tracking terminate simultaneously.
+
+### Consequences
+- **Positive:**
+  - Highly performant, direct trajectory execution without redundant middleware translation hops.
+  - 100% verified against live simulation graph (`m1_controllers.log`, `m1_trajectory.log`, `docs/ros2_interfaces.md`).
+  - Simplifies workspace dependencies (eliminates `munder_difflin_msgs` build bottlenecks).
+  - Preserves swappable perception architecture.
+- **Negative:**
+  - Perception and grasp verification cannot be restarted independently of the backend executor (documented known limitation).
+- **Negative:**
+  - The ROS 2 graph operates with standard MoveIt/controller actions rather than dedicated custom actions.

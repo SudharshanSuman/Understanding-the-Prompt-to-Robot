@@ -101,3 +101,11 @@ Nothing is packaged or published. `electron-builder --dir` is not set up on purp
 app needs the Python backend and its virtualenv, which an unpacked Electron build cannot carry in a
 way that is offline-safe and reproducible. Adding the builder would also bring a large set of
 download-at-build-time dependencies. Run from the repo with `npm start`.
+
+### Electron fuses (before any packaging; SEC-015-D2)
+
+Not set today: the app only runs from `node_modules/electron` and is never packaged. Before shipping a packaged build,
+flip these fuses on the packaged binary (with `@electron/fuses`, a new dependency that needs approval):
+`RunAsNode` off, `EnableNodeOptionsEnvironmentVariable` off, `EnableNodeCliInspectArguments` off,
+`EnableEmbeddedAsarIntegrityValidation` on, `OnlyLoadAppFromAsar` on. Without them, anyone who can start the binary can
+run it as plain Node (`ELECTRON_RUN_AS_NODE=1`) or attach an inspector, which skips every lockdown listed above.

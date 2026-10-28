@@ -238,9 +238,15 @@ No install scripts have been committed yet. This finding remains open until scri
 ---
 
 ### SEC-011 — ROS 2 DDS Network Exposure
-**Severity: MEDIUM** | **Owner: Jim (A), Pam (D)** | **Status: 🔍 PENDING (no ROS 2 yet)**
+**Severity: MEDIUM** | **Owner: Andy (I), Pam (D), Jim (A)** | **Status: ❌ OPEN (MD-SEC-003)**
 
-No ROS 2 workspace or launch files exist yet. The backend binds to `127.0.0.1` by default (`config.py:37`) and refuses non-loopback without `MD_ALLOW_REMOTE=true`. Finding remains open.
+ROS 2 workspace now exists (`ros2_ws/`, uncommitted). Evidence (2026-10-28, read-only):
+1. `docs/INTERFACE_CONTRACTS.md:521` and `docs/architecture.md:336` require DDS localhost-only (`ROS_LOCALHOST_ONLY=1`).
+2. The run scripts set only `ROS_DOMAIN_ID=42`: `scripts/demo.sh:16`, `bringup/scripts/smoke_test.sh:9`, `bringup/scripts/demo_pick_place.sh:16`, `docs/installation.md:105`. No script or launch file sets `ROS_AUTOMATIC_DISCOVERY_RANGE` (the Jazzy setting; `ROS_LOCALHOST_ONLY` is deprecated in Jazzy) or `ROS_LOCALHOST_ONLY`. `grep` over `ros2_ws/src`, `scripts/`, `docs/` found none. A domain ID is not isolation: any host on the LAN using domain 42 can discover and call every topic, action and service.
+3. Angela's test rig did set `ROS_LOCALHOST_ONLY=1` (TEST_REPORT_ros_m1.md), so tests ran isolated; the demo/run paths do not.
+4. No SROS2 (DDS security) — acceptable for a local simulator if discovery is confined to localhost.
+
+Defect **SEC-011-D1** (MEDIUM, Andy/Pam): see §5. Not a commit blocker; a release-gate item.
 
 ---
 
@@ -265,37 +271,60 @@ No ROS 2 workspace or launch files exist yet. The backend binds to `127.0.0.1` b
 ---
 
 ### SEC-013 — E-Stop Implementation
-**Severity: HIGH** | **Owner: Pam (D), Jim (A)** | **Status: ⚠️ PARTIALLY MITIGATED**
+**Severity: HIGH** | **Owner: Pam (D), Andy (I), Jim (A)** | **Status: ⚠️ SUBSTANTIALLY MITIGATED — executor level proven, independent end-to-end run outstanding (MD-SEC-003)**
 
-**Evidence (what works):**
-1. `executor.py:SimulatedExecutor.emergency_stop()` (L100-113): reads joint velocities back, reports `e_stop_confirmed` only if all |v| < 1e-4 AND controller is STOPPED. ✅
-2. Unconfirmed stop → `e_stop_unverified` with HTTP 503 (`routes.py:131-132`). ✅
-3. E-stop latches: `_latched = True`, new task creation blocked until reset (`tasks.py:166-167`). ✅
-4. Active tasks cancelled on e-stop: `routes.py:129` → `tasks.cancel_all_active()`. ✅
-5. Not rate-limited: confirmed by `test_e_stop_is_not_rate_limited`. ✅
-6. Separate HTTP endpoint (not WS-dependent): `POST /api/v1/simulation/e-stop`. ✅
-7. Reset required before new commands: tested in `test_e_stop_reports_observed_state_and_latches`. ✅
-8. Tests: `test_e_stop_that_cannot_be_confirmed_is_not_reported_as_stopped` (controller fails to stop → 503). ✅
+**Evidence from MD-SEC-002 (backend, still valid):** read-back-confirmed stop report, 503 on unverified stop, latch blocks new tasks, active tasks cancelled, not rate-limited, separate HTTP endpoint, reset required (`executor.py`, `routes.py`, `tasks.py`, tests listed in the MD-SEC-002 review).
 
-**Open items (not defects — expected at this stage):**
-- SEC-013.6: E-stop under load (mid-trajectory stop) cannot be tested until a real Executor with ROS 2 is connected. Pam correctly documented this. The SimulatedExecutor never executes trajectories, so there's no motion to stop.
-- The architecture is correct: when a real Executor implements `emergency_stop()`, it must read back actual joint states from the controller. The contract is enforced by the `StopReport` schema.
+**New evidence — real ROS executor (`ros2_ws/src/munder_difflin_control/munder_difflin_control/ros_executor.py`):**
+1. `emergency_stop()` latches first, cancels all action goals, deactivates `panda_arm_controller` via `controller_manager/switch_controller`, then reads `/joint_states` velocity 10 times over 0.5 s and reports the worst sample; NaN read-back → treated as infinite → not confirmed; any exception → `e_stop_unverified` (never raises). ✅
+2. `_check()` refuses every motion step while latched (`ExecutorError('emergency stop latched...')`). ✅
+3. `reset()` keeps the latch if the controller does not come back `active`. ✅
+4. `ros2_ws/logs/m5f_executor.log` (2026-10-28 08:55, real Gazebo + MoveIt): e-stop issued **during motion** (blue_cube → platform, while "descending to grasp") → `e_stop_confirmed`, `controller_state STOPPED`, `max_joint_velocity 8.15e-11` (tolerance 1e-4), `requires_reset True`; task stage → `failed: emergency stop`; status `can_execute False, e_stop_latched True`; a new execute was refused; after reset `can_execute True`. `ESTOP RESULT: PASS`. Cancel mid-run also PASS. ✅
+5. Angela (TEST_REPORT_ros_m1.md, independent): ROS-level cancel mid-trajectory PASS, motion stopped 0.10 s after request, drift 0.00037 rad. ✅
 
-**Status:** Architecture is sound and testable for the simulated case. Full evidence requires real executor integration (Phase 2).
+**Gaps (why not ✅):**
+- G1: the m5f run is a developer harness log, not an independent tester run. Angela's report lists executor-level D/E/F, the backend half of G and `/munder_difflin/safety/emergency_stop` as **not executed** (milestone 1 had no ROS executor).
+- G2: no recorded run of the full path `POST /api/v1/simulation/e-stop` → `backend_with_ros` → `RosExecutor` → read-back (HTTP auth + latch + 503 path with the real executor).
+- G3: stop latency for e-stop (request → velocity < tolerance) is not measured; only the post-stop read-back is. Cancel latency (0.10 s) was measured.
+- G4: the ROS services `/munder_difflin/safety/emergency_stop` and `/munder_difflin/safety/reset` have no caller authentication; with DDS not confined to localhost (SEC-011-D1) any LAN peer on domain 42 can clear the executor latch. The backend task latch (`tasks.py`) stays set, so the backend will not start new tasks, but the executor and controllers are reachable directly. Folded into SEC-011-D1 / SEC-013-D1.
+
+**To close:** Angela (or another independent tester) runs the HTTP e-stop mid-motion against `backend_with_ros` with discovery confined to localhost, recording request→stop latency and the read-back; fix SEC-013-D1.
 
 ---
 
 ### SEC-014 — Frontend Build Security
-**Severity: MEDIUM** | **Owner: Pam (D), Stanley (REL)** | **Status: 🔍 PENDING (no frontend yet)**
+**Severity: MEDIUM** | **Owner: Pam (D), Stanley (REL)** | **Status: ✅ MITIGATED (MD-SEC-003), one LOW residual**
 
-No frontend code has been committed yet. `.gitignore` covers `node_modules/`, `dist/`, `build/`, `*.map`. Finding remains open.
+Evidence (2026-10-28, `frontend/`, read-only plus existing tests/audits):
+1. **CSP**: production build injects a strict meta CSP (`vite.config.ts` plugin `md-csp`, build only): `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' <api> <ws>; object-src 'none'; base-uri 'none'; form-action 'none'`. Confirmed present in `dist/index.html`. No `unsafe-inline` / `unsafe-eval`. ✅
+2. **Source maps**: `build.sourcemap: false`; `find dist -name '*.map'` → none; no `sourceMappingURL` in `dist/`. `.gitignore` excludes `dist/` and `*.map`. ✅
+3. **Token handling**: token entered at runtime into a `type=password autocomplete=off` field, held only in React state / the `Api` instance (`api.ts:26`); sent as `Authorization: Bearer` and as the first WS message (`socket.ts:45`), never in a URL. `grep` for `localStorage|sessionStorage|indexedDB|document.cookie` in `src/` → none. Only `VITE_API_BASE` (a URL) is read at build; `import.meta.env` unused in `src/`. ✅ (closes S6)
+4. **XSS surface**: `grep` for `dangerouslySetInnerHTML|innerHTML|eval(|new Function|document.write` in `src/` → none. Model output, stage data and token text are rendered as React text children (auto-escaped). No `href`/`window.open` built from data. `<meta name="referrer" content="no-referrer">`. ✅
+5. **Dependencies**: exact version pins in `package.json` (react 19.3.1, vite 7.3.7, …), `package-lock.json` lockfileVersion 3. `npm audit` → **0 vulnerabilities** (all deps and `--omit=dev`). ✅
+6. **Tests**: `npx vitest run` → 5 files, 17 tests passed (run 2026-10-28 by MD-SEC-003). ✅
+
+**Residual SEC-014-D1 (LOW, Pam):** `frame-ancestors` cannot be set by a `<meta>` CSP, and browser mode is served by the Vite dev/preview server, which sends no CSP header and no `X-Frame-Options` (dev server has no CSP at all, by design for HMR). Risk is low because the server binds 127.0.0.1 and the token is never stored, but a framing page could clickjack the e-stop/reset buttons. Fix: add `server.headers`/`preview.headers` with `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`. Desktop mode is already fixed (SEC-015, header CSP with `frame-ancestors 'none'`).
 
 ---
 
-### SEC-015 — Desktop App Security (Tauri/Electron)
-**Severity: MEDIUM** | **Owner: Jim (A), Pam (D)** | **Status: 🔍 PENDING (Phase 9)**
+### SEC-015 — Desktop App Security (Electron)
+**Severity: MEDIUM** | **Owner: Pam (D), Jim (A); human for the OS step** | **Status: ✅ MITIGATED in code (MD-SEC-003); OS namespace sandbox not verified on this host**
 
-Not applicable until desktop packaging begins.
+Evidence (2026-10-28, `desktop/`, uncommitted; Electron 44.9.3 exact pin):
+1. **Renderer isolation** (`main.cjs` `createWindow`): `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` plus `app.enableSandbox()`, `webSecurity: true`, `allowRunningInsecureContent: false`, `webviewTag: false`, DevTools only with `MD_DESKTOP_DEVTOOLS=1`, no application menu. ✅
+2. **Preload bridge** (`preload.cjs`): one frozen method `mdDesktop.session()` → `ipcRenderer.invoke('md:session')`; no Node API, no generic `send`/`on` passthrough. The IPC handler refuses any sender that is not the main frame or whose URL is not under `app://munder/`. ✅
+3. **Navigation**: `setWindowOpenHandler` → deny; `will-navigate`/`will-redirect` blocked outside `app://munder/`; `will-attach-webview` prevented; all permission requests and checks denied. `webRequest.onBeforeRequest` cancels everything except `app://munder` and the single backend origin (http/ws). ✅
+4. **Content loading**: custom `app://` protocol serves only `frontend/dist`; `resolveInside` rejects traversal and NUL bytes (unit-tested); other hosts → 404. CSP sent as an HTTP **header** on every response incl. 404 (`frame-ancestors 'none'`, `connect-src` pinned to the backend), meta CSP stripped, `nosniff`, `no-store`. ✅ (resolves SEC-014.6 in desktop mode)
+5. **Token handoff**: `crypto.randomBytes(32)` per launch; passed to the backend child **only via env** (not argv, not file); `DEBUG`, `MD_ALLOW_REMOTE`, `ELECTRON_RUN_AS_NODE` removed from the child env; backend forced to `127.0.0.1`, origin allow-list `app://munder`, `MD_REQUIRE_ORIGIN=true`. Connect mode accepts only loopback http(s) URLs with no credentials/path, and the token is then typed by the user. Backend killed on quit (SIGTERM, then SIGKILL after 3 s). ✅
+6. **`--no-sandbox` refused** by `npm start` (reads `process.argv`, since Chromium consumes the switches). ✅
+7. **Supply chain**: `package-lock.json` present, `npm audit` → **0 vulnerabilities**; Pam moved 44.7.1 → 44.9.3 for GHSA-jr5w-w6x2-84p9. `node_modules/` ignored. Secret scan of `desktop/` → clean. ✅
+8. **Tests**: `node --test test/unit.test.cjs` → 7/7 pass (run 2026-10-28 by MD-SEC-003). Smoke test (Pam, MD-DEV-006): all checks pass incl. renderer seccomp-bpf, **except** the namespace layer, which was run with `--no-sandbox` and is reported "not verified". I did not re-run the smoke test (it opens a window and launches the backend).
+
+**Open items:**
+- **SEC-015-D1 (MEDIUM, human + Stanley, environment not code):** OS namespace sandbox unverified on Ubuntu 24.04 (`kernel.apparmor_restrict_unprivileged_userns=1`). Needs the sudo AppArmor profile from `desktop/README.md` (option A), then `npm run smoke` with the sandbox on. Until then the desktop app must not be used on this host except via the smoke test. Not a commit blocker.
+- **SEC-015-D2 (LOW, Pam, before any packaging):** Electron fuses (`RunAsNode`, `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments`, ASAR integrity) are not set. Not applicable while the app runs from the repo with `electron .`; required if `electron-builder` is ever added.
+- **SEC-015-D3 (INFO, Pam):** `lib.requestAllowed` lets any `data:` URL through the request filter. CSP already limits `data:` to images, so no exploit path today; narrowing to `data:image/` would make the filter match the policy.
+- Connect mode was not live-tested (unit-tested URL checks only).
 
 ---
 
@@ -369,7 +398,7 @@ Thumbs.db
 | S3 | `grep` for key patterns → only `os.environ.get()` | Dwight (SEC) | ✅ Verified: all 3 providers use `self._env.get()` |
 | S4 | No `.env` file committed in git history | Stanley (REL) | 🔍 Pending (no git history to check yet) |
 | S5 | Backend `main.py` validates required env vars at startup | Pam (D) | ✅ Verified: `Settings.from_env().validate()` fails fast |
-| S6 | Frontend build config does not reference secret env vars | Pam (D) | 🔍 Pending (no frontend yet) |
+| S6 | Frontend build config does not reference secret env vars | Pam (D) | ✅ Verified (MD-SEC-003): only `VITE_API_BASE` read; no `import.meta.env` in `src/` |
 | S7 | Docker configs use env injection or Docker secrets | Stanley (REL) | 🔍 Pending (no Docker yet) |
 | S8 | Pre-commit hook for secret scanning installed | Stanley (REL) | 🔍 Pending |
 | S9 | Log sanitizer redacts secrets in all log outputs | Pam (D) | ✅ Verified: `RedactingFilter` + `RedactedJSONResponse` + WS `safe_dumps` |
@@ -386,9 +415,25 @@ Thumbs.db
 | SEC-004 | API Key Management | CRITICAL | ✅ Has evidence | Env-only, .gitignore, redaction. Minor: add lockfile |
 | SEC-005 | FastAPI Auth on Robot Endpoints | HIGH | ✅ Has evidence | Constant-time compare, rate limiting, 60-check test matrix |
 | SEC-012 | Deterministic Safety Layer | CRITICAL | ✅ Has evidence | Mandatory gateway, sequential stages, no bypass path |
-| SEC-013 | E-Stop Implementation | HIGH | ⚠️ Partial | Architecture sound; full evidence needs real executor |
+| SEC-013 | E-Stop Implementation | HIGH | ⚠️ Partial (stronger) | Real RosExecutor mid-motion e-stop confirmed (m5f log, v=8e-11); independent HTTP end-to-end run + SEC-013-D1 outstanding |
 
-**Summary: 5 of 6 release blockers have full evidence. SEC-013 is architecturally complete but needs real-executor integration testing.**
+**Summary: 5 of 6 release blockers have full evidence. SEC-013 now has real-executor evidence (developer run); it closes after an independent HTTP e-stop run against `backend_with_ros` and the SEC-011-D1/SEC-013-D1 fix.**
+
+---
+
+## 5a. New Defects Found (MD-SEC-003)
+
+| ID | Finding | Severity | Description | Owner |
+|----|---------|----------|-------------|-------|
+| SEC-011-D1 | DDS exposure | MEDIUM | Run scripts (`scripts/demo.sh`, `bringup/scripts/*.sh`, `docs/installation.md`) set only `ROS_DOMAIN_ID=42`; contracts require localhost-only. Export `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST` (Jazzy) and `ROS_LOCALHOST_ONLY=1` (compat) in every script/launch path and the docs. | Andy (I) / Pam (D) |
+| SEC-013-D1 | E-stop | MEDIUM | `/munder_difflin/safety/reset` (and `emergency_stop`) ROS services accept any DDS caller and clear/set the executor latch. After SEC-011-D1, document that reset is local-only; consider dropping the ROS `reset` service so reset goes only through the authenticated HTTP API. | Pam (D) / Jim (A) |
+| SEC-014-D1 | Frontend | LOW | Vite dev/preview send no `frame-ancestors`/`X-Frame-Options`; meta CSP cannot carry `frame-ancestors`. Add headers in `server.headers`/`preview.headers`. | Pam (D) |
+| SEC-015-D1 | Desktop | MEDIUM (env) | OS namespace sandbox unverified: needs human sudo AppArmor step, then `npm run smoke` sandboxed. | Human / Stanley (REL) |
+| SEC-015-D2 | Desktop | LOW | Electron fuses not set; required before any packaging. | Pam (D) |
+| SEC-015-D3 | Desktop | INFO | Request filter allows all `data:` URLs; narrow to `data:image/`. | Pam (D) |
+| REL-PYLIB | Repo hygiene | LOW | `ros2_ws/pylib/{yaml,_yaml,numpy,lark}` are absolute symlinks into `/usr/lib/python3/dist-packages`. Not a secret; non-portable. Prefer creating them at setup (script) over committing them. | Stanley (REL) / Andy (I) |
+
+**Commit verdict (MD-SEC-003):** `desktop/` — **may be committed** (no secrets, lockfile, audit 0, unit tests pass, `node_modules/` ignored). `ros2_ws/` — **may be committed** for `src/` and `munder_difflin.repos` (secret scan clean; `build/`, `install/`, `log/`, `logs/` are git-ignored, verified with `git check-ignore`); `pylib/` symlinks better excluded (REL-PYLIB). None of the defects above blocks a commit; SEC-011-D1, SEC-013 and SEC-015-D1 block release (Quality Gate E).
 
 ---
 
@@ -421,9 +466,9 @@ Thumbs.db
 
 | Owner | Findings |
 |-------|----------|
-| **Jim (A)** | SEC-001✅, SEC-002✅, SEC-003✅, SEC-008🔍, SEC-011🔍, SEC-012✅, SEC-013⚠️, SEC-015🔍 |
-| **Pam (D)** | SEC-001✅, SEC-002✅, SEC-003✅, SEC-004✅, SEC-005✅, SEC-006✅, SEC-007✅, SEC-010✅, SEC-011🔍, SEC-012✅, SEC-013⚠️, SEC-014🔍, SEC-015🔍 |
-| **Stanley (REL)** | SEC-004✅, SEC-008🔍, SEC-014🔍 |
+| **Jim (A)** | SEC-001✅, SEC-002✅, SEC-003✅, SEC-008🔍, SEC-011❌, SEC-012✅, SEC-013⚠️, SEC-015✅ |
+| **Pam (D)** | SEC-001✅, SEC-002✅, SEC-003✅, SEC-004✅, SEC-005✅, SEC-006✅, SEC-007✅, SEC-010✅, SEC-011❌, SEC-012✅, SEC-013⚠️, SEC-014✅, SEC-015✅ |
+| **Stanley (REL)** | SEC-004✅, SEC-008🔍, SEC-014✅, SEC-015-D1, REL-PYLIB |
 | **Ryan (S)** | SEC-009✅ |
 | **Dwight (SEC)** | SEC-009✅ (review gate), S3✅ |
 
@@ -432,11 +477,13 @@ Thumbs.db
 ## 8. Appendix: Pending Reviews
 
 - [x] ~~Jim's architecture docs~~ — safety layer architecture reviewed in code
-- [ ] Pam's frontend code — review when frontend lands (SEC-014)
+- [x] ~~Pam's frontend code~~ — reviewed (MD-SEC-003, SEC-014)
+- [x] ~~Electron wrapper~~ — reviewed (MD-SEC-003, SEC-015)
 - [ ] Stanley's install scripts — review per SEC-008
-- [ ] ROS 2 integration — review DDS security, launch config (SEC-011, SEC-013.6)
+- [~] ROS 2 integration — reviewed (MD-SEC-003): SEC-011-D1 open; SEC-013 independent HTTP e-stop run pending
 - [ ] Docker configuration — review per S7
 - [x] ~~Ryan's skill shortlist~~ — reviewed and approved (MD-SKILL-001)
 - [x] ~~Installed skills~~ — verified against approved list (MD-SEC-002)
 
 _Updated 2026-10-28T05:55Z after MD-SEC-002 code review._
+_Updated 2026-10-28 by MD-SEC-003 (temp reviewer standing in for Dwight): SEC-011, SEC-013, SEC-014, SEC-015, S6._

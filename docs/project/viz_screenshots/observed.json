@@ -1,0 +1,329 @@
+{
+  "scene_without_telemetry": {
+    "text": "SceneNo live Gazebo state \u2014 ros unavailable. Schematic from the scene configuration; positions are illustrative, not measured.table (schematic, not to scale)arm base (pose unknown)blue_cubegreen_cylinderplatformred_cubestorage_boxtableplatformstorage_boxtable_lefttable_right target destinationObjects: 6 \u00b7 Destinations: 4 \u00b7 Perception: unavailable",
+    "badge": false,
+    "badgeText": null,
+    "canvas": false
+  },
+  "flow_after_submit": {
+    "tokens": [
+      {
+        "i": "0",
+        "cls": "flow-token flow-token--action",
+        "text": "Pick",
+        "anim": "flow-in"
+      },
+      {
+        "i": "1",
+        "cls": "flow-token",
+        "text": "up",
+        "anim": "flow-in"
+      },
+      {
+        "i": "2",
+        "cls": "flow-token",
+        "text": "the",
+        "anim": "flow-in"
+      },
+      {
+        "i": "3",
+        "cls": "flow-token flow-token--object",
+        "text": "red",
+        "anim": "flow-in"
+      },
+      {
+        "i": "4",
+        "cls": "flow-token flow-token--object",
+        "text": "cube",
+        "anim": "flow-in"
+      },
+      {
+        "i": "5",
+        "cls": "flow-token",
+        "text": "and",
+        "anim": "flow-in"
+      },
+      {
+        "i": "6",
+        "cls": "flow-token flow-token--action",
+        "text": "place",
+        "anim": "flow-in"
+      },
+      {
+        "i": "7",
+        "cls": "flow-token",
+        "text": "it",
+        "anim": "flow-in"
+      },
+      {
+        "i": "8",
+        "cls": "flow-token",
+        "text": "in",
+        "anim": "flow-in"
+      },
+      {
+        "i": "9",
+        "cls": "flow-token",
+        "text": "the",
+        "anim": "flow-in"
+      },
+      {
+        "i": "10",
+        "cls": "flow-token flow-token--destination",
+        "text": "storage",
+        "anim": "flow-in"
+      },
+      {
+        "i": "11",
+        "cls": "flow-token flow-token--destination",
+        "text": "box",
+        "anim": "flow-in"
+      }
+    ],
+    "stages": [
+      {
+        "stage": "instruction",
+        "state": "success",
+        "text": "NL ProcessingInstructionSuccess \u00b7 0 ms"
+      },
+      {
+        "stage": "tokenization",
+        "state": "success",
+        "text": "TokenizationSuccess \u00b7 229 ms"
+      },
+      {
+        "stage": "interpretation",
+        "state": "warning",
+        "text": "InterpretationWarning \u00b7 2 ms"
+      },
+      {
+        "stage": "structured_task",
+        "state": "success",
+        "text": "Structured taskSuccess \u00b7 0 ms"
+      },
+      {
+        "stage": "schema_validation",
+        "state": "success",
+        "text": "Safety InterlockSchema validationSuccess \u00b7 0 ms"
+      },
+      {
+        "stage": "feasibility",
+        "state": "warning",
+        "text": "FeasibilityWarning \u00b7 0 ms"
+      },
+      {
+        "stage": "grounding",
+        "state": "cancelled",
+        "text": "Spatial & KinematicsObject / destination groundingCancelled"
+      },
+      {
+        "stage": "planning_scene",
+        "state": "cancelled",
+        "text": "Planning sceneCancelled"
+      },
+      {
+        "stage": "ik",
+        "state": "cancelled",
+        "text": "Inverse kinematicsCancelled"
+      },
+      {
+        "stage": "planning",
+        "state": "cancelled",
+        "text": "Motion PlanningCollision-aware planningCancelled"
+      },
+      {
+        "stage": "trajectory_validation",
+        "state": "cancelled",
+        "text": "Trajectory validationCancelled"
+      },
+      {
+        "stage": "execution",
+        "state": "cancelled",
+        "text": "Simulation & VerificationROS 2 executionCancelled"
+      },
+      {
+        "stage": "simulation",
+        "state": "cancelled",
+        "text": "Gazebo simulationCancelled"
+      },
+      {
+        "stage": "verification",
+        "state": "cancelled",
+        "text": "VerificationCancelled"
+      }
+    ],
+    "outcome": "no_executor",
+    "outcomeText": "Passed the safety checks, but no executor is connected: nothing was executed \u00b7 Object / destination grounding: no executor connected",
+    "approx": false,
+    "banner": null,
+    "replayDisabled": false,
+    "stopReplay": false
+  },
+  "flow_rejected": {
+    "tokens": [
+      {
+        "i": "0",
+        "cls": "flow-token",
+        "text": "make",
+        "anim": "flow-in"
+      },
+      {
+        "i": "1",
+        "cls": "flow-token",
+        "text": "me",
+        "anim": "flow-in"
+      },
+      {
+        "i": "2",
+        "cls": "flow-token",
+        "text": "a",
+        "anim": "flow-in"
+      },
+      {
+        "i": "3",
+        "cls": "flow-token",
+        "text": "sandwich",
+        "anim": "flow-in"
+      },
+      {
+        "i": "4",
+        "cls": "flow-token",
+        "text": "on",
+        "anim": "flow-in"
+      },
+      {
+        "i": "5",
+        "cls": "flow-token",
+        "text": "the",
+        "anim": "flow-in"
+      },
+      {
+        "i": "6",
+        "cls": "flow-token",
+        "text": "moon",
+        "anim": "flow-in"
+      }
+    ],
+    "stages": [
+      {
+        "stage": "instruction",
+        "state": "success",
+        "text": "NL ProcessingInstructionSuccess \u00b7 0 ms"
+      },
+      {
+        "stage": "tokenization",
+        "state": "success",
+        "text": "TokenizationSuccess \u00b7 189 ms"
+      },
+      {
+        "stage": "interpretation",
+        "state": "needs_clarification",
+        "text": "InterpretationNeeds clarification \u00b7 1 ms"
+      },
+      {
+        "stage": "structured_task",
+        "state": "cancelled",
+        "text": "Structured taskCancelled"
+      },
+      {
+        "stage": "schema_validation",
+        "state": "cancelled",
+        "text": "Safety InterlockSchema validationCancelled"
+      },
+      {
+        "stage": "feasibility",
+        "state": "cancelled",
+        "text": "FeasibilityCancelled"
+      },
+      {
+        "stage": "grounding",
+        "state": "cancelled",
+        "text": "Spatial & KinematicsObject / destination groundingCancelled"
+      },
+      {
+        "stage": "planning_scene",
+        "state": "cancelled",
+        "text": "Planning sceneCancelled"
+      },
+      {
+        "stage": "ik",
+        "state": "cancelled",
+        "text": "Inverse kinematicsCancelled"
+      },
+      {
+        "stage": "planning",
+        "state": "cancelled",
+        "text": "Motion PlanningCollision-aware planningCancelled"
+      },
+      {
+        "stage": "trajectory_validation",
+        "state": "cancelled",
+        "text": "Trajectory validationCancelled"
+      },
+      {
+        "stage": "execution",
+        "state": "cancelled",
+        "text": "Simulation & VerificationROS 2 executionCancelled"
+      },
+      {
+        "stage": "simulation",
+        "state": "cancelled",
+        "text": "Gazebo simulationCancelled"
+      },
+      {
+        "stage": "verification",
+        "state": "cancelled",
+        "text": "VerificationCancelled"
+      }
+    ],
+    "outcome": "needs_clarification",
+    "outcomeText": "Needs clarification: nothing was sent to the robot \u00b7 Interpretation: What should the robot do? Supported: pick an object and place it at a destination.",
+    "approx": false,
+    "banner": null,
+    "replayDisabled": false,
+    "stopReplay": false
+  },
+  "flow_before_any_run": {
+    "tokens": [],
+    "stages": [],
+    "outcome": null,
+    "outcomeText": null,
+    "approx": false,
+    "banner": null,
+    "replayDisabled": true,
+    "stopReplay": false
+  },
+  "flow_replay": {
+    "tokens": [],
+    "stages": [],
+    "outcome": null,
+    "outcomeText": null,
+    "approx": false,
+    "banner": "Replay of the recorded run (9%). Not live.",
+    "replayDisabled": null,
+    "stopReplay": true
+  },
+  "reduced_motion_animation_names": [
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none",
+    "none"
+  ],
+  "console": [],
+  "exceptions": [],
+  "scene_fallback": {
+    "text": "SceneNo live Gazebo state \u2014 ros unavailable. Schematic from the scene configuration; positions are illustrative, not measured.table (schematic, not to scale)arm base (pose unknown)blue_cubegreen_cylinderplatformred_cubestorage_boxtableplatformstorage_boxtable_lefttable_right target destinationObjects: 6 \u00b7 Destinations: 4 \u00b7 Perception: unavailable",
+    "badge": false,
+    "badgeText": null,
+    "canvas": false
+  },
+  "eval_hits": {}
+}

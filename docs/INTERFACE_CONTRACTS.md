@@ -436,45 +436,72 @@ FastAPI Backend runs on port `8000` (configurable via `APP_PORT`).
 
 All ROS 2 nodes live in `munder_difflin/ros2_ws/src/`.
 
-### 8.1 Package Architecture
+### 8.1 Package Architecture (Live Graph Alignment)
 
-| Package Name | Type | Responsibility |
-| :--- | :--- | :--- |
-| `munder_difflin_msgs` | CMake (Interfaces) | Custom `.msg`, `.srv`, `.action` definitions |
-| `munder_difflin_description` | CMake / Ament | URDF / Xacro for arm, gripper, sensors, camera |
-| `munder_difflin_gazebo` | CMake / Ament | Gazebo Harmonic worlds, SDF models (table, cubes, bins), spawn launch |
-| `munder_difflin_moveit_config` | CMake / Ament | SRDF, kinematics solvers, OMPL config, joint limits |
-| `munder_difflin_perception` | Python (`rclpy`) | Ground truth extractor + RGB-D vision node + tf2 publisher |
-| `munder_difflin_planning` | C++ / Python | MoveIt 2 Python/C++ node, IK checker, collision scene manager |
-| `munder_difflin_control` | Python (`rclpy`) | Grasp execution action server, trajectory executor, safety monitor |
-| `munder_difflin_bringup` | Python (`launch`) | Master launch files combining simulation, controllers, and backend |
+All built ROS 2 packages live in `munder_difflin/ros2_ws/src/`. Per ADR-013, the in-process `RosExecutor` runs perception, planning invocation, grasp attachment, and verification directly within `munder_difflin_control`, eliminating the need to build intermediate custom interface packages.
 
-### 8.2 ROS 2 Topic & Action Interface Registry (Verified Franka Panda Primary + UR5e Fallback)
+| Package Name | Type | Built Status | Responsibility |
+| :--- | :--- | :--- | :--- |
+| `munder_difflin_description` | CMake / Ament | **BUILT & VERIFIED** | Robot URDF/Xacro, Franka Panda links, materials, transmissions |
+| `munder_difflin_gazebo` | CMake / Ament | **BUILT & VERIFIED** | Gazebo Harmonic world SDF (`munder_difflin.sdf`), table, objects, lighting |
+| `munder_difflin_moveit_config` | CMake / Ament | **BUILT & VERIFIED** | MoveIt 2 SRDF (`panda.srdf` with `panda_arm` + `panda_hand`), OMPL config, controllers |
+| `munder_difflin_control` | Python (`rclpy`) | **BUILT & VERIFIED** | Contains `RosExecutor`, trajectory monitoring, e-stop service, attach bridges |
+| `munder_difflin_bringup` | Python (`launch`) | **BUILT & VERIFIED** | Master launch files (`sim.launch.py`, `moveit.launch.py`, smoke tests) |
+| `munder_difflin_msgs` | CMake (Interfaces) | **NOT BUILT (ADR-013)** | Superseded; custom ROS messages replaced by standard MoveIt & std_msgs interfaces |
+| `munder_difflin_perception` | Python (`rclpy`) | **NOT BUILT (ADR-013)** | Ingested directly in-process via `/model/<id>/pose` ground-truth topics |
+| `munder_difflin_planning` | C++ / Python | **NOT BUILT (ADR-013)** | Superseded; MoveIt 2 accessed directly via standard `/move_action` |
 
-Following Oscar's environment research report (`docs/research/arm_selection.md`), **Franka Emika Panda (7-DOF) with native Franka Hand** is the primary manipulator, and **Universal Robots UR5e** is the fallback.
+### 8.2 ROS 2 Topic & Action Interface Registry (Confirmed from Live Graph - ADR-012 & ADR-013)
+
+Per ADR-012, the platform uses pre-compiled Debian binary packages **`moveit_resources_panda_description`** and **`moveit_resources_panda_moveit_config`** (from `apt ros-jazzy-moveit-resources-panda-*`), superseding `franka_ros2` to eliminate `libfranka` mock dependencies and maintain stable joint naming (`panda_joint1..7` vs. `fer_*`).
+
+**Launch Entrypoints:**
+- Simulation + Controllers: `ros2 launch munder_difflin_bringup sim.launch.py` (Gazebo Harmonic headless `-s`, loads `gz_ros2_control` systems).
+- Full Planning Stack: `ros2 launch munder_difflin_bringup moveit.launch.py` (sim + MoveIt 2 `move_group`; optional `rviz:=true`).
+- Smoke Test: `munder_difflin/ros2_ws/src/munder_difflin_bringup/scripts/smoke_test.sh --moveit`.
 
 #### Primary Manipulator: Franka Emika Panda (`panda_arm` + `panda_hand`)
-- Base Link: `panda_link0`
-- End-Effector Tip: `panda_hand` (or `panda_link8`)
-- Gripper Fingers: `panda_finger_joint1`, `panda_finger_joint2`
+- **Package Source:** `moveit_resources_panda_description`, `moveit_resources_panda_moveit_config`
+- **Base Link:** `world` == base of `panda_link0`
+- **End-Effector / Tool Link:** `panda_hand` (TCP is 0.1034 m below its origin along Z-axis)
+- **Arm Joints:** `panda_joint1..7` (Home/ready pose: `[0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]`)
+- **Gripper Joints:** `panda_finger_joint1` (active) + `panda_finger_joint2` (mimic joint); travel range is 0.0 m (closed) to 0.04 m (open) per finger (total grip width 0.08 m).
+- **MoveIt Planning Groups:** `panda_arm` (kinematic chain `panda_link0`..`panda_link8`), `panda_hand` (fingers, renamed in `config/panda.srdf` from upstream `hand` to match contract).
 
-| Interface Name | Type | Direction / Owner | Description |
-| :--- | :--- | :--- | :--- |
-| `/joint_states` | `sensor_msgs/msg/JointState` | Published by ros2_control | Live joint positions/velocities for 7 arm joints + 2 finger joints |
-| `/tf`, `/tf_static` | `tf2_msgs/msg/TFMessage` | Robot state publisher & perception | Coordinate transform tree (`world` -> `panda_link0` -> `panda_hand`) |
-| `/perception/detected_objects` | `munder_difflin_msgs/msg/DetectedObjectArray` | Owned by `munder_difflin_perception` | Standardized object list & poses |
-| `/planning_scene` | `moveit_msgs/msg/PlanningScene` | Owned by `munder_difflin_planning` | MoveIt 2 collision scene |
-| `/munder_difflin/execute_task` | Action: `munder_difflin_msgs/action/ExecuteTask` | Server: `munder_difflin_planning` / Client: Backend | Long-running task execution action |
-| `/munder_difflin/grasp` | Action: `munder_difflin_msgs/action/GraspObject` | Server: `munder_difflin_control` | Hybrid grasp action (finger close + DetachableJoint attach) |
-| `/panda_arm_controller/follow_joint_trajectory` | Action: `control_msgs/action/FollowJointTrajectory` | ros2_control controller | MoveIt 2 arm trajectory execution interface |
-| `/panda_hand_controller/gripper_cmd` | Action: `control_msgs/action/GripperCommand` | ros2_control controller | Parallel jaw finger position/effort command |
-| `/munder_difflin/safety/emergency_stop` | Service: `std_srvs/srv/Trigger` | Server: `munder_difflin_control` | Hardware/sim emergency stop; halts controllers and locks brakes |
-| `/munder_difflin/verification/verify_placement` | Service: `munder_difflin_msgs/srv/VerifyPlacement` | Server: `munder_difflin_control` | Spatial verification check post-placement |
+| Interface Name | Type | Direction / Owner | Description | Status in Live Graph |
+| :--- | :--- | :--- | :--- | :--- |
+| `/joint_states` | `sensor_msgs/msg/JointState` | `joint_state_broadcaster` | 7 arm + 2 finger joints (position & velocity feedback) | **VERIFIED ACTIVE** |
+| `/tf`, `/tf_static` | `tf2_msgs/msg/TFMessage` | `robot_state_publisher` | Coordinate transform trees (`world` -> `panda_link0` -> ... -> `panda_hand`) | **VERIFIED ACTIVE** |
+| `/panda_arm_controller/follow_joint_trajectory` | Action: `control_msgs/action/FollowJointTrajectory` | `panda_arm_controller` (JointTrajectoryController) | Arm trajectory execution interface | **VERIFIED ACTIVE** (Goal tested, error_code 0) |
+| `/panda_hand_controller/gripper_cmd` | Action: `control_msgs/action/GripperCommand` | `panda_hand_controller` (GripperActionController) | Parallel jaw finger position/effort command (0.0..0.04m) | **VERIFIED ACTIVE** |
+| `/move_action` | Action: `moveit_msgs/action/MoveGroup` | `move_group` (MoveIt 2) | Full Cartesian / kinematic motion planning action | **VERIFIED ACTIVE** |
+| `/execute_trajectory` | Action: `moveit_msgs/action/ExecuteTrajectory` | `move_group` (MoveIt 2) | Executes pre-planned trajectory via controller manager | **VERIFIED ACTIVE** |
+| `/model/{red_cube,blue_cube,green_cylinder}/pose` | `geometry_msgs/msg/Pose` | Gazebo Bridge (`ros_gz_bridge`) | Ground truth object poses at 20 Hz (perception ground truth) | **VERIFIED ACTIVE** |
+| `/munder_difflin/gz/attach/<id>`, `/detach/<id>` | `std_msgs/msg/Empty` | `RosExecutor` -> Gazebo | Triggers `DetachableJoint` plugin for `red_cube`, `blue_cube`, `green_cylinder` | **VERIFIED ACTIVE** |
+| `/munder_difflin/gz/attached/<id>` | `std_msgs/msg/Bool` | Gazebo -> `RosExecutor` | Broadcasts confirmed attach/detach status | **VERIFIED ACTIVE** |
+| `/munder_difflin/telemetry` | `std_msgs/msg/String` (JSON) | `RosExecutor` | Live system telemetry at 5 Hz while executor is running | **VERIFIED ACTIVE** |
+| `/munder_difflin/safety/emergency_stop` | Service: `std_srvs/srv/Trigger` | `RosExecutor` | Halts controllers, checks velocities < 1e-4 rad/s, returns `StopReport` | **VERIFIED ACTIVE** |
+| `/munder_difflin/safety/reset` | Service: `std_srvs/srv/Trigger` | `RosExecutor` | Clears e-stop latch, re-enables controllers, resets home pose | **VERIFIED ACTIVE** |
 
-#### Fallback Manipulator Mapping: Universal Robots UR5e
-- Arm Action: `/scaled_joint_trajectory_controller/follow_joint_trajectory`
-- Base Link: `base_link`
-- Flange Link: `tool0`
+### 8.3 Execution Architecture: In-Process `RosExecutor` Adapter (ADR-013)
+
+Per authoritative direction from `god`:
+1. **In-Process Integration:**
+   - Andy's **`RosExecutor`** (`munder_difflin_control.ros_executor.RosExecutor`, implementing `backend/app/executor.py::Executor`) executes grasping, placement verification, and perception in-process.
+   - Do **NOT** build `munder_difflin_msgs`, `/munder_difflin/execute_task`, `/munder_difflin/grasp`, `/munder_difflin/verification/verify_placement`, or `/perception/detected_objects`.
+   - Instead, `RosExecutor` calls standard MoveIt 2 actions (`/move_action`), controller actions (`/panda_arm_controller/follow_joint_trajectory`, `/panda_hand_controller/gripper_cmd`), and the Gazebo topic bridges directly via `rclpy`.
+2. **Swappable Perception Contract:**
+   - The object-pose interface remains swappable (`ObjectPoseSource` interface):
+     - Currently ingests simulation ground-truth poses from `/model/{red_cube,blue_cube,green_cylinder}/pose` at 20 Hz.
+     - Swappable to RGB-D camera pointclouds/detection without altering task planning or execution logic.
+3. **Known Architectural Limitation:**
+   - **Single-Process Execution Coupling:** Task execution, grasp state tracking, placement verification, and perception parsing run in the same Python process as `RosExecutor`. They are not independently restartable microservice nodes. If the executor process terminates, all active control loops and state tracking terminate simultaneously.
+
+#### Fallback Manipulator Mapping: Universal Robots UR5e (Retained)
+- **Package Source:** `ros-jazzy-ur-simulation-gz` (Debian binary in apt)
+- **Arm Action:** `/scaled_joint_trajectory_controller/follow_joint_trajectory`
+- **Base Link:** `base_link`
+- **Flange Link:** `tool0`
 
 ---
 
