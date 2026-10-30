@@ -17,7 +17,7 @@ Natural-language control for a simulated robot arm. You type an instruction (*"P
 [ User Instruction ]
          │
          ▼
-[ 1. Tokenization ] ────► Authentically tokenized input (BPE or character tokens)
+[ 1. Tokenization ] ────► Approximate word-level tokens (inspection only; never drives the arm)
          │
          ▼
 [ 2. Interpretation ] ──► Pluggable AI Provider (Cloud / NVIDIA / Ollama / Fallback)
@@ -58,6 +58,54 @@ Every command flows through 14 inspectable stages surfaced live over WebSocket:
 12. `execution`: Joint trajectory streaming via `ros2_control` hardware interfaces.
 13. `simulation`: Gazebo physics propagation and DetachableJoint hybrid grasp attach/detach.
 14. `verification`: Final post-execution joint state and object pose read-back verification.
+
+---
+
+## 1b. How It Works (Plain-Language Guide)
+
+The system has two halves. A **Python backend** (`backend/app/`) turns your sentence into a safe, structured task. A **ROS 2 executor** (`ros2_ws/.../ros_executor.py`) turns that task into arm motion. The stages are run in order by `backend/app/pipeline.py`.
+
+### Half 1: Sentence → structured task (`backend/app/`)
+
+| Step | File | What happens |
+|---|---|---|
+| Instruction | `pipeline.py` | `sanitize_instruction` cleans the text and rejects bad input. |
+| Tokenization | `tokenizer.py` | Splits the sentence into words, numbers and punctuation with a regex (`regex_word_level`). It is labelled **approximate**: there are no token IDs. A real BPE tokenizer (`tiktoken`) is optional and not installed by default. Tokens are for display only and never decide an action. |
+| Word checks | `validation/validator.py` | Deterministic code runs *before* any model. An unknown object (e.g. "yellow sphere") is rejected. An ambiguous command ("move it over there") returns a clarification question instead of guessing. |
+| Interpretation | `providers/chain.py` | Tries each configured provider in order; if one is missing or fails, it moves to the next. The rule-based fallback always runs last. |
+| Structured task | `schemas/task.py` | The answer must be a strict `TaskPlan`: `action` (`pick_and_place`), `object`, `destination`, `constraints` (e.g. avoid the blue cube, keep upright) and `confidence`. Anything else is rejected. |
+| Schema + scene check | `validation/validator.py` | The plan is re-validated and compared with your request (it must not name an object you never mentioned) and with `config/scene.json`. |
+| Feasibility | `validation/validator.py` | Reachability and confidence gate. Often "unknown" at this point; MoveIt's inverse kinematics (IK) gives the real answer later. |
+
+### Which models are used
+
+| Provider | Model (default) | Needs |
+|---|---|---|
+| Cloud (`providers/http_providers.py`) | `claude-sonnet-5-5` (Anthropic API) | `ANTHROPIC_API_KEY` |
+| NVIDIA hosted | `meta/llama-3.1-8b-instruct` (OpenAI-compatible API, temperature 0) | `NVIDIA_API_KEY` |
+| Local (Ollama, CPU) | `llama3.2` (JSON mode) | the model pulled with `ollama pull`; or set `MD_LOCAL_MODEL` to a model you already have |
+| Deterministic fallback (`providers/fallback.py`) | **No AI model.** Rule-based parser for the action verb, target, destination, "avoid X" and "keep upright" | nothing |
+
+> [!NOTE]
+> With no API key and no matching Ollama model, **every prompt is handled by the rule-based fallback**, not an AI model. The interpretation stage in the console shows which provider ran. MoveIt, OMPL (path planner) and IK are classical algorithms, not learned models.
+
+Each model gets a system prompt (`build_system_prompt` in `providers/base.py`) built from the scene's object list, asking for **one JSON object** and no guessing. Your sentence is sent as quoted data (`{"instruction": "..."}`), so text like "ignore your rules" is just data. Invalid replies are retried, then rejected. A model's output is only ever a *proposal*.
+
+### Half 2: Structured task → arm motion (`ros_executor.py`)
+
+Stages 7–14 run inside `RosExecutor` and each is reported only after reading real state:
+
+1. **Grounding:** reads true object poses from Gazebo (labelled `simulation-ground-truth`; there is no camera).
+2. **Planning scene:** gives MoveIt the table, storage box and other obstacles.
+3. **IK:** solves joint angles for four poses (pre-grasp, grasp, pre-place, place). Any unreachable pose fails the task.
+4. **Planning:** MoveIt/OMPL finds a collision-free path to the pre-grasp pose.
+5. **Trajectory validation:** joint limits and timing are checked.
+6. **Execution (via `ros2_control`):** open gripper → pre-grasp → descend → close gripper → attach (finger friction plus a Gazebo `DetachableJoint`) → lift → move above the box → descend → release → retreat → return home.
+7. **Simulation + verification:** confirms the object really moved in Gazebo and landed within 0.09 m (x/y) of the destination.
+
+### Safety rule
+
+Model text never reaches the joints. Only MoveIt-planned, validated trajectories are executed, and e-stop / cancel work at any time.
 
 ---
 
